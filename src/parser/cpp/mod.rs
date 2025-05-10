@@ -3,6 +3,8 @@ use nom::character::complete::{multispace0, one_of};
 use nom::{IResult, Parser, error::ParseError, sequence::delimited};
 
 mod class;
+mod method;
+mod ctype;
 
 pub fn ws<'a, O, E: ParseError<&'a str>, F>(inner: F) -> impl Parser<&'a str, Output = O, Error = E>
 where
@@ -14,6 +16,10 @@ where
 
 fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '-'
+}
+
+fn is_namespace_ident_char(c: char) -> bool {
+    is_ident_char(c) || c == ':'
 }
 
 fn extended_identifier<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, &'a str, E> {

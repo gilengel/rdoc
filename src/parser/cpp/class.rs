@@ -1,15 +1,18 @@
-﻿use crate::parser::cpp::parse_ws_str;
+﻿use crate::parser::cpp::method::{CppFunction, parse_cpp_method};
+use crate::parser::cpp::parse_ws_str;
 use nom::branch::alt;
 use nom::character::complete::multispace0;
 use nom::combinator::{opt, value};
-use nom::multi::separated_list1;
+use nom::multi::{separated_list0, separated_list1};
 use nom::{IResult, Parser, bytes::complete::tag};
+use crate::parser::cpp::ctype::CType::Base;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct CppClass<'a> {
     name: &'a str,
     api: Option<&'a str>,
     parents: Vec<CppParentClass<'a>>,
+    methods: Vec<CppFunction<'a>>,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -91,6 +94,8 @@ fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
 
     let (input, _) = tag("{")(input)?;
     let (input, _) = multispace0(input)?; // skip everything between {} of a class for the moment
+
+    let (input, methods) = separated_list0(tag("\n"), parse_cpp_method).parse(input)?;
     let (input, _) = tag("}")(input)?;
 
     Ok((
@@ -99,6 +104,7 @@ fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
             name,
             api,
             parents: parents.unwrap_or(vec![]),
+            methods,
         },
     ))
 }
@@ -108,6 +114,8 @@ mod tests {
     use crate::parser::cpp::class::{
         CppClass, CppParentClass, InheritanceVisibility, parse_cpp_class,
     };
+    use crate::parser::cpp::ctype::CType::Base;
+    use crate::parser::cpp::method::CppFunction;
     use rand::Rng;
 
     fn random_whitespace_string() -> String {
@@ -137,6 +145,7 @@ mod tests {
                             name: "a",
                             visibility: InheritanceVisibility::from(visibility)
                         }],
+                        methods: vec![]
                     }
                 ))
             );
@@ -163,6 +172,7 @@ mod tests {
                             visibility: InheritanceVisibility::Private
                         }
                     ],
+                    methods: vec![]
                 }
             ))
         );
@@ -179,6 +189,7 @@ mod tests {
                     name: "test",
                     api: Some("MY_API"),
                     parents: vec![],
+                    methods: vec![]
                 }
             ))
         );
@@ -200,10 +211,99 @@ mod tests {
                     CppClass {
                         name: "test",
                         api: None,
-                        parents: vec![]
+                        parents: vec![],
+                        methods: vec![]
                     }
                 ))
             );
         }
     }
+
+    #[test]
+    fn test_parse_class_with_method() {
+        let input = format!("class test {{void hello();}}");
+        assert_eq!(
+            parse_cpp_class(&input[..]),
+            Ok((
+                "",
+                CppClass {
+                    name: "test",
+                    api: None,
+                    parents: vec![],
+                    methods: vec![CppFunction {
+                        name: "hello",
+                        return_type: Base("void"),
+                        params: vec![],
+                        inheritance_modifiers: vec![],
+                        is_const: false
+                    }]
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_parse_class_with_multiple_methods() {
+        let input = format!("class test {{void hello();\nvoid goodbye();}}");
+        assert_eq!(
+            parse_cpp_class(&input[..]),
+            Ok((
+                "",
+                CppClass {
+                    name: "test",
+                    api: None,
+                    parents: vec![],
+                    methods: vec![
+                        CppFunction {
+                            name: "hello",
+                            return_type: Base("void"),
+                            params: vec![],
+                            inheritance_modifiers: vec![],
+                            is_const: false
+                        },
+                        CppFunction {
+                            name: "goodbye",
+                            return_type: Base("void"),
+                            params: vec![],
+                            inheritance_modifiers: vec![],
+                            is_const: false
+                        }
+                    ]
+                }
+            ))
+        );
+    }
 }
+
+#[test]
+fn test_parse_class_with_multiple_mixed_methods() {
+    let input = format!("class test {{void hello();\nauto goodbye() -> int;}}");
+    assert_eq!(
+        parse_cpp_class(&input[..]),
+        Ok((
+            "",
+            CppClass {
+                name: "test",
+                api: None,
+                parents: vec![],
+                methods: vec![
+                    CppFunction {
+                        name: "hello",
+                        return_type: Base("void"),
+                        params: vec![],
+                        inheritance_modifiers: vec![],
+                        is_const: false
+                    },
+                    CppFunction {
+                        name: "goodbye",
+                        return_type: Base("int"),
+                        params: vec![],
+                        inheritance_modifiers: vec![],
+                        is_const: false
+                    }
+                ]
+            }
+        ))
+    );
+}
+

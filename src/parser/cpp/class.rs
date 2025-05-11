@@ -95,7 +95,11 @@ fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
     let (input, _) = char('{')(input)?;
     let (input, _) = multispace0(input)?; // skip everything between {} of a class for the moment
 
-    let (input, methods) = separated_list0(tag("\n"), parse_cpp_method).parse(input)?;
+    let (input, methods) = separated_list0(char(';'), parse_cpp_method).parse(input)?;
+
+    // if we have multiple methods the last one leaves its ; behind
+    let (input, _) = opt(char(';')).parse(input)?;
+
     let (input, _) = char('}')(input)?;
 
     Ok((

@@ -5,6 +5,7 @@ use nom::{IResult, Parser, error::ParseError, sequence::delimited};
 mod class;
 mod method;
 mod ctype;
+mod comment;
 
 pub fn ws<'a, O, E: ParseError<&'a str>, F>(inner: F) -> impl Parser<&'a str, Output = O, Error = E>
 where

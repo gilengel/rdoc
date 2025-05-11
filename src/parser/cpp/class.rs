@@ -126,7 +126,7 @@ fn skip_to_next_line(input: &str) -> IResult<&str, (), nom::error::Error<&str>> 
     Ok((input, ()))
 }
 fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
-    let (input, _) = tag("class")(input)?;
+    let (input, _) = alt((tag("class"), tag("struct"))).parse(input)?;
     let (input, maybe_api) = parse_ws_str(input)?;
     let (input, maybe_name_result) = opt(parse_ws_str).parse(input)?;
 
@@ -250,6 +250,21 @@ mod tests {
                 ))
             );
         }
+    }
+
+    #[test]
+    fn test_parse_empty_struct() {
+        let input = "struct Test {};";
+        assert_eq!(
+            parse_cpp_class(&input[..]),
+            Ok((
+                "",
+                CppClass {
+                    name: "Test",
+                    ..CppClass::default()
+                }
+            ))
+        );
     }
 
     #[test]

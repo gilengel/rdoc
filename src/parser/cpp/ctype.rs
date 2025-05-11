@@ -20,6 +20,12 @@ pub enum CType<'a> {
     MemberAccess(Box<CType<'a>>, &'a str),    // ...::value
 }
 
+impl Default for CType<'static> {
+    fn default() -> Self {
+        CType::Path(Vec::new())
+    }
+}
+
 fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }

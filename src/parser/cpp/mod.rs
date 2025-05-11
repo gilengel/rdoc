@@ -6,6 +6,7 @@ mod class;
 mod method;
 mod ctype;
 mod comment;
+mod member;
 
 pub fn ws<'a, O, E: ParseError<&'a str>, F>(inner: F) -> impl Parser<&'a str, Output = O, Error = E>
 where

@@ -1,5 +1,6 @@
 ﻿use crate::parser::cpp::comment::CppComment;
 use crate::parser::cpp::ctype::CType;
+use crate::parser::cpp::member::{parse_cpp_member, CppMember};
 use crate::parser::cpp::method::{CppFunction, parse_cpp_method};
 use crate::parser::cpp::parse_ws_str;
 use nom::branch::alt;
@@ -10,6 +11,7 @@ use nom::multi::separated_list1;
 use nom::sequence::terminated;
 use nom::{IResult, Parser, bytes::complete::tag};
 use std::collections::HashMap;
+use crate::parser::cpp::ctype::CType::Path;
 
 #[derive(Debug, PartialEq, Clone)]
 struct CppClass<'a> {
@@ -17,6 +19,7 @@ struct CppClass<'a> {
     api: Option<&'a str>,
     parents: Vec<CppParentClass<'a>>,
     methods: HashMap<InheritanceVisibility, Vec<CppFunction<'a>>>,
+    members: HashMap<InheritanceVisibility, Vec<CppMember<'a>>>,
 }
 
 impl Default for CppClass<'_> {
@@ -26,6 +29,11 @@ impl Default for CppClass<'_> {
             api: None,
             parents: vec![],
             methods: HashMap::from([
+                (InheritanceVisibility::Public, vec![]),
+                (InheritanceVisibility::Protected, vec![]),
+                (InheritanceVisibility::Private, vec![]),
+            ]),
+            members: HashMap::from([
                 (InheritanceVisibility::Public, vec![]),
                 (InheritanceVisibility::Protected, vec![]),
                 (InheritanceVisibility::Private, vec![]),
@@ -134,6 +142,13 @@ fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
         (InheritanceVisibility::Protected, vec![]),
         (InheritanceVisibility::Public, vec![]),
     ]);
+
+    let mut members: HashMap<InheritanceVisibility, Vec<CppMember>> = HashMap::from([
+        (InheritanceVisibility::Private, vec![]),
+        (InheritanceVisibility::Protected, vec![]),
+        (InheritanceVisibility::Public, vec![]),
+    ]);
+
     let (input, _) = char('{')(input)?;
     let (mut input, _) = multispace0(input)?; // skip everything between {} of a class for the moment
 
@@ -156,6 +171,7 @@ fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
                     api,
                     parents: parents.unwrap_or(vec![]),
                     methods,
+                    members,
                 },
             ));
         }
@@ -168,6 +184,12 @@ fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
 
         if let Ok((next_input, method)) = parse_cpp_method(input) {
             methods.get_mut(&current_access).unwrap().push(method);
+            input = next_input;
+            continue;
+        }
+
+        if let Ok((next_input, member)) = parse_cpp_member(input) {
+            members.get_mut(&current_access).unwrap().push(member);
             input = next_input;
             continue;
         }
@@ -329,8 +351,6 @@ mod tests {
                 "",
                 CppClass {
                     name: "test",
-                    api: None,
-                    parents: vec![],
                     methods: HashMap::from([
                         (
                             InheritanceVisibility::Private,
@@ -349,7 +369,8 @@ mod tests {
                         ),
                         (InheritanceVisibility::Protected, vec![]),
                         (InheritanceVisibility::Public, vec![]),
-                    ])
+                    ]),
+                    ..CppClass::default()
                 }
             ))
         );
@@ -365,8 +386,6 @@ fn test_parse_class_with_multiple_mixed_methods() {
             "",
             CppClass {
                 name: "test",
-                api: None,
-                parents: vec![],
                 methods: HashMap::from([
                     (
                         InheritanceVisibility::Private,
@@ -384,7 +403,8 @@ fn test_parse_class_with_multiple_mixed_methods() {
                     ),
                     (InheritanceVisibility::Protected, vec![]),
                     (InheritanceVisibility::Public, vec![]),
-                ])
+                ]),
+                ..CppClass::default()
             }
         ))
     );
@@ -406,13 +426,15 @@ fn test_simple_class() {
              * says hello to everybody that listens
              */
             auto hello() -> void;
+
+        private:
+            /// internal counter on how many times others were greeted
+            int count{0};
     };"#;
 
     let result = parse_cpp_class(&input[..]).unwrap().1;
     let expected = CppClass {
         name: "TestClass",
-        api: None,
-        parents: vec![],
         methods: HashMap::from([
             (
                 InheritanceVisibility::Private,
@@ -445,6 +467,29 @@ fn test_simple_class() {
                 }],
             ),
         ]),
+        members: HashMap::from([
+            (
+                InheritanceVisibility::Private,
+                vec![CppMember {
+                    name: "count",
+                    ctype: Path(vec!["int"]),
+                    default_value: Some(Path(vec!["0"])),
+                    is_const: false,
+                    comment: Some(CppComment {
+                        comment: "internal counter on how many times others were greeted".to_string(),
+                    }),
+                }],
+            ),
+            (
+                InheritanceVisibility::Protected,
+                vec![],
+            ),
+            (
+                InheritanceVisibility::Public,
+                vec![],
+            ),
+        ]),
+        ..CppClass::default()
     };
 
     assert_eq!(result, expected,);

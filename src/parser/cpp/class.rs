@@ -5,7 +5,7 @@ use nom::character::complete::multispace0;
 use nom::combinator::{opt, value};
 use nom::multi::{separated_list0, separated_list1};
 use nom::{IResult, Parser, bytes::complete::tag};
-use crate::parser::cpp::ctype::CType::Base;
+use crate::parser::cpp::ctype::CType;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct CppClass<'a> {
@@ -114,9 +114,9 @@ mod tests {
     use crate::parser::cpp::class::{
         CppClass, CppParentClass, InheritanceVisibility, parse_cpp_class,
     };
-    use crate::parser::cpp::ctype::CType::Base;
     use crate::parser::cpp::method::CppFunction;
     use rand::Rng;
+    use crate::parser::cpp::ctype::CType;
 
     fn random_whitespace_string() -> String {
         let mut rng = rand::rng();
@@ -232,10 +232,7 @@ mod tests {
                     parents: vec![],
                     methods: vec![CppFunction {
                         name: "hello",
-                        return_type: Base("void"),
-                        params: vec![],
-                        inheritance_modifiers: vec![],
-                        is_const: false
+                        ..Default::default()
                     }]
                 }
             ))
@@ -256,17 +253,13 @@ mod tests {
                     methods: vec![
                         CppFunction {
                             name: "hello",
-                            return_type: Base("void"),
-                            params: vec![],
-                            inheritance_modifiers: vec![],
-                            is_const: false
+                            return_type: CType::Path(vec!["void"]),
+                            ..Default::default()
                         },
                         CppFunction {
                             name: "goodbye",
-                            return_type: Base("void"),
-                            params: vec![],
-                            inheritance_modifiers: vec![],
-                            is_const: false
+                            return_type: CType::Path(vec!["void"]),
+                            ..Default::default()
                         }
                     ]
                 }
@@ -289,21 +282,15 @@ fn test_parse_class_with_multiple_mixed_methods() {
                 methods: vec![
                     CppFunction {
                         name: "hello",
-                        return_type: Base("void"),
-                        params: vec![],
-                        inheritance_modifiers: vec![],
-                        is_const: false
+                        ..Default::default()
                     },
                     CppFunction {
                         name: "goodbye",
-                        return_type: Base("int"),
-                        params: vec![],
-                        inheritance_modifiers: vec![],
-                        is_const: false
+                        return_type: CType::Path(vec!["int"]),
+                        ..Default::default()
                     }
                 ]
             }
         ))
     );
 }
-

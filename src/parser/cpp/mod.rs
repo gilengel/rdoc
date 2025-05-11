@@ -18,10 +18,6 @@ fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '-'
 }
 
-fn is_namespace_ident_char(c: char) -> bool {
-    is_ident_char(c) || c == ':'
-}
-
 fn extended_identifier<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, &'a str, E> {
     take_while1(is_ident_char).parse(i)
 }

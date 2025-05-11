@@ -379,4 +379,26 @@ mod tests {
             ))
         );
     }
+
+    #[test]
+    fn test_method_with_lambda_param() {
+        let input = "auto method(std::function<int(int)>& lambda) -> int;";
+        assert_eq!(
+            parse_cpp_method(&input[..]),
+            Ok((
+                "",
+                CppFunction {
+                    name: "method",
+                    return_type: Pointer(Box::from(Pointer(Box::from(Base("int"))))),
+                    params: vec![CppMethodParam {
+                        name: "a",
+                        is_const: false,
+                        ctype: Pointer(Box::from(Base("int")))
+                    }],
+                    inheritance_modifiers: vec![Final],
+                    is_const: false,
+                }
+            ))
+        );
+    }
 }

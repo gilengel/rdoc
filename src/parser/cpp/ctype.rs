@@ -1,4 +1,5 @@
-﻿use nom::{
+﻿use crate::parser::cpp::is_namespace_ident_char;
+use nom::{
     IResult, Parser,
     branch::alt,
     bytes::complete::take_while1,
@@ -7,7 +8,6 @@
     multi::many0,
     sequence::{delimited, preceded},
 };
-use crate::parser::cpp::is_namespace_ident_char;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum CType<'a> {
@@ -16,7 +16,6 @@ pub enum CType<'a> {
     Pointer(Box<CType<'a>>),
     Reference(Box<CType<'a>>),
 }
-
 
 fn identifier(input: &str) -> IResult<&str, &str> {
     take_while1(is_namespace_ident_char)(input)
@@ -60,95 +59,66 @@ mod tests {
     #[test]
     fn test_simple_identifier() {
         let (_, ty) = ctype("String").unwrap();
-        assert!(matches!(ty, CType::Base("String")));
+        assert_eq!(ty, CType::Base("String"));
     }
 
     #[test]
     fn test_generic() {
         let (_, ty) = ctype("String<Some>").unwrap();
-        match ty {
-            CType::Generic("String", inner) => {
-                assert!(matches!(*inner, CType::Base("Some")));
-            }
-            _ => panic!("Expected generic"),
-        }
+        assert_eq!(ty, CType::Generic("String", Box::new(CType::Base("Some"))));
     }
 
     #[test]
     fn test_nested_generic() {
         let (_, ty) = ctype("String<Array<Some>>").unwrap();
-        match ty {
-            CType::Generic("String", inner) => match *inner {
-                CType::Generic("Array", inner2) => {
-                    assert!(matches!(*inner2, CType::Base("Some")));
-                }
-                _ => panic!("Expected nested generic"),
-            },
-            _ => panic!("Expected generic"),
-        }
+        assert_eq!(ty, CType::Generic("String", Box::new(CType::Generic("Array", Box::new(CType::Base("Some"))))));
     }
 
     #[test]
     fn test_generic_with_pointer() {
         let (_, ty) = ctype("String<Array*>").unwrap();
-        match ty {
-            CType::Generic("String", inner) => match *inner {
-                CType::Pointer(inner2) => {
-                    assert!(matches!(*inner2, CType::Base("Array")));
-                }
-                _ => panic!("Expected pointer in generic"),
-            },
-            _ => panic!("Expected generic"),
-        }
+        assert_eq!(ty, CType::Generic("String", Box::new(CType::Pointer(Box::new(CType::Base("Array"))))));
     }
 
     #[test]
     fn test_reference() {
         let (_, ty) = ctype("String&").unwrap();
-        match ty {
-            CType::Reference(inner) => assert!(matches!(*inner, CType::Base("String"))),
-            _ => panic!("Expected reference"),
-        }
+        assert_eq!(ty, CType::Reference(Box::new(CType::Base("String"))))
     }
 
     #[test]
     fn test_double_reference_nested() {
         let (_, ty) = ctype("Array<String&>&").unwrap();
-        match ty {
-            CType::Reference(outer) => match *outer {
-                CType::Generic("Array", inner) => match *inner {
-                    CType::Reference(ref_inner) => {
-                        assert!(matches!(*ref_inner, CType::Base("String")));
-                    }
-                    _ => panic!("Expected inner reference"),
-                },
-                _ => panic!("Expected generic"),
-            },
-            _ => panic!("Expected outer reference"),
-        }
+        assert_eq!(
+            ty,
+            CType::Reference(Box::new(CType::Generic(
+                "Array",
+                Box::new(CType::Reference(Box::new(CType::Base("String"))))
+            )))
+        )
     }
 
     #[test]
     fn test_double_reference() {
         let (_, ty) = ctype("Array&&").unwrap();
-        match ty {
-            CType::Reference(inner) => match *inner {
-                CType::Reference(inner2) => assert!(matches!(*inner2, CType::Base("Array"))),
-                _ => panic!("Expected inner reference"),
-            },
-            _ => panic!("Expected outer reference"),
-        }
+        assert_eq!(
+            ty,
+            CType::Reference(Box::new(CType::Reference(Box::new(CType::Base("Array")))))
+        );
     }
 
     #[test]
     fn test_double_pointer() {
         let (_, ty) = ctype("Array**").unwrap();
-        match ty {
-            CType::Pointer(inner) => match *inner {
-                CType::Pointer(inner2) => assert!(matches!(*inner2, CType::Base("Array"))),
-                _ => panic!("Expected inner pointer"),
-            },
-            _ => panic!("Expected outer pointer"),
-        }
+        assert_eq!(
+            ty,
+            CType::Pointer(Box::new(CType::Pointer(Box::new(CType::Base("Array")))))
+        );
+    }
+
+    #[test]
+    fn test_lambda() {
+        let (_, ty) = ctype("std::function<int(int>&").unwrap();
+        assert_eq!(ty, CType::Base("std::function"));
     }
 }

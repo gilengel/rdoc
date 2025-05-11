@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use crate::parser::cpp::ctype::CType::Path;
 
 #[derive(Debug, PartialEq, Clone)]
-struct CppClass<'a> {
+pub struct CppClass<'a> {
     name: &'a str,
     api: Option<&'a str>,
     parents: Vec<CppParentClass<'a>>,
@@ -125,7 +125,7 @@ fn skip_to_next_line(input: &str) -> IResult<&str, (), nom::error::Error<&str>> 
     let input = input.strip_prefix('\n').unwrap_or(input);
     Ok((input, ()))
 }
-fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
+pub fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
     let (input, _) = alt((tag("class"), tag("struct"))).parse(input)?;
     let (input, maybe_api) = parse_ws_str(input)?;
     let (input, maybe_name_result) = opt(parse_ws_str).parse(input)?;

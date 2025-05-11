@@ -2,9 +2,10 @@
 use crate::parser::cpp::ctype::{CType, parse_cpp_type};
 use crate::parser::cpp::{parse_ws_str, ws};
 use nom::branch::alt;
-use nom::character::complete::multispace0;
-use nom::combinator::opt;
+use nom::character::complete::{char, multispace0};
+use nom::combinator::{map, opt, peek};
 use nom::multi::separated_list0;
+use nom::sequence::delimited;
 use nom::{IResult, Parser, bytes::complete::tag};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -49,7 +50,7 @@ impl<'a> Default for CppFunction<'a> {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct CppMethodParam<'a> {
-    name: &'a str,
+    name: Option<&'a str>,
     ctype: CType<'a>,
     is_const: bool,
 }
@@ -58,15 +59,15 @@ fn parse_template_param(input: &str) -> IResult<&str, CType> {
     let (input, _) = ws(alt((tag("typename"), tag("class")))).parse(input)?;
     let (input, ctype) = parse_cpp_type(input)?;
     let (input, _) = multispace0(input)?;
-    let (input, _) = opt((ws(tag("=")), multispace0, parse_cpp_type)).parse(input)?;
+    let (input, _) = opt((ws(char('=')), multispace0, parse_cpp_type)).parse(input)?;
 
     Ok((input, ctype))
 }
 fn parse_template(input: &str) -> IResult<&str, Vec<CType>> {
     let (input, _) = ws(tag("template")).parse(input)?;
-    let (input, _) = tag("<").parse(input)?;
+    let (input, _) = char('<').parse(input)?;
     let (input, params) = separated_list0(tag(","), parse_template_param).parse(input)?;
-    let (input, _) = ws(tag(">")).parse(input)?;
+    let (input, _) = ws(char('>')).parse(input)?;
 
     Ok((input, params))
 }
@@ -74,7 +75,7 @@ fn parse_cpp_method_param(input: &str) -> IResult<&str, CppMethodParam> {
     let (input, is_const) = opt(tag("const")).parse(input)?;
     let (input, _) = multispace0(input)?;
     let (input, ctype) = parse_cpp_type(input)?;
-    let (input, name) = parse_ws_str(input)?;
+    let (input, name) = opt(parse_ws_str).parse(input)?;
 
     Ok((
         input,
@@ -87,9 +88,18 @@ fn parse_cpp_method_param(input: &str) -> IResult<&str, CppMethodParam> {
 }
 
 pub fn parse_method_params(input: &str) -> IResult<&str, Vec<CppMethodParam>> {
-    let (input, _) = tag("(").parse(input)?;
-    let (input, params) = separated_list0(tag(","), parse_cpp_method_param).parse(input)?;
-    let (input, _) = tag(")").parse(input)?;
+    let (input, _) = (char('('), multispace0).parse(input)?;
+
+    let (input, params) = alt((
+        map(peek(char(')')), |_| Vec::new()),
+        separated_list0(
+            delimited(multispace0, char(','), multispace0),
+            parse_cpp_method_param,
+        ),
+    ))
+    .parse(input)?;
+
+    let (input, _) = delimited(multispace0, char(')'), multispace0).parse(input)?;
 
     Ok((input, params))
 }
@@ -122,7 +132,7 @@ pub fn parse_cpp_method(input: &str) -> IResult<&str, CppFunction> {
         alt((parse_trailing_return_method, parse_classic_method)).parse(input)?;
 
     let (input, function_params) = separated_list0(tag(","), parse_ws_str).parse(input)?;
-    let (input, _) = tag(";").parse(input)?;
+    let (input, _) = char(';').parse(input)?;
 
     let mut inheritance_modifiers = Vec::new();
 
@@ -231,7 +241,7 @@ mod tests {
                 CppFunction {
                     name: "method",
                     params: vec![CppMethodParam {
-                        name: "a",
+                        name: Some("a"),
                         is_const: false,
                         ctype: Path(vec!["int"])
                     }],
@@ -271,7 +281,7 @@ mod tests {
                 CppFunction {
                     name: "method",
                     params: vec![CppMethodParam {
-                        name: "a",
+                        name: Some("a"),
                         is_const: false,
                         ctype: Reference(Box::from(Path(vec!["int"])))
                     }],
@@ -292,7 +302,7 @@ mod tests {
                 CppFunction {
                     name: "method",
                     params: vec![CppMethodParam {
-                        name: "a",
+                        name: Some("a"),
                         is_const: true,
                         ctype: Reference(Box::from(Path(vec!["int"])))
                     }],
@@ -313,7 +323,7 @@ mod tests {
                 CppFunction {
                     name: "method",
                     params: vec![CppMethodParam {
-                        name: "a",
+                        name: Some("a"),
                         is_const: false,
                         ctype: Pointer(Box::from(Path(vec!["int"])))
                     }],
@@ -335,12 +345,12 @@ mod tests {
                     name: "method",
                     params: vec![
                         CppMethodParam {
-                            name: "a",
+                            name: Some("a"),
                             is_const: false,
                             ctype: Reference(Box::from(Path(vec!["int"])))
                         },
                         CppMethodParam {
-                            name: "b",
+                            name: Some("b"),
                             is_const: false,
                             ctype: Path(vec!["std", "string"])
                         }
@@ -362,7 +372,7 @@ mod tests {
                 CppFunction {
                     name: "method",
                     params: vec![CppMethodParam {
-                        name: "a",
+                        name: Some("a"),
                         is_const: false,
                         ctype: Generic(Box::from(Path(vec!["TArray"])), vec![Path(vec!["int32"])])
                     }],
@@ -400,7 +410,7 @@ mod tests {
                     name: "method",
                     return_type: Pointer(Box::from(Pointer(Box::from(Path(vec!["int"]))))),
                     params: vec![CppMethodParam {
-                        name: "a",
+                        name: Some("a"),
                         is_const: false,
                         ctype: Pointer(Box::from(Path(vec!["int"])))
                     }],
@@ -430,7 +440,7 @@ mod tests {
                     name: "method",
                     return_type: Path(vec!["int"]),
                     params: vec![CppMethodParam {
-                        name: "lambda",
+                        name: Some("lambda"),
                         ctype: param_ctype,
                         is_const: false
                     }],
@@ -467,8 +477,29 @@ mod tests {
                     name: "method",
                     return_type: Path(vec!["void"]),
                     params: vec![CppMethodParam {
-                        name: "a",
+                        name: Some("a"),
                         ctype: Path(vec!["Integer"]),
+                        is_const: false
+                    },],
+                    ..Default::default()
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_method_with_unnamed_param() {
+        let input = "void method(int);";
+        assert_eq!(
+            parse_cpp_method(&input[..]),
+            Ok((
+                "",
+                CppFunction {
+                    name: "method",
+                    return_type: Path(vec!["void"]),
+                    params: vec![CppMethodParam {
+                        name: None,
+                        ctype: Path(vec!["int"]),
                         is_const: false
                     },],
                     ..Default::default()

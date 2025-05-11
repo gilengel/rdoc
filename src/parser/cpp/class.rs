@@ -1,7 +1,7 @@
 ﻿use crate::parser::cpp::method::{CppFunction, parse_cpp_method};
 use crate::parser::cpp::parse_ws_str;
 use nom::branch::alt;
-use nom::character::complete::multispace0;
+use nom::character::complete::{char, multispace0};
 use nom::combinator::{opt, value};
 use nom::multi::{separated_list0, separated_list1};
 use nom::{IResult, Parser, bytes::complete::tag};
@@ -73,9 +73,9 @@ fn parse_single_inheritance(input: &str) -> IResult<&str, CppParentClass> {
 }
 fn parse_inheritance(input: &str) -> IResult<&str, Vec<CppParentClass>> {
     let (input, _) = multispace0(input)?;
-    let (input, _) = tag(":")(input)?;
+    let (input, _) = char(':')(input)?;
     let (input, parent_classes) =
-        separated_list1(tag(","), parse_single_inheritance).parse(input)?;
+        separated_list1(char(','), parse_single_inheritance).parse(input)?;
 
     Ok((input, parent_classes))
 }
@@ -92,11 +92,11 @@ fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
 
     let (input, parents) = opt(parse_inheritance).parse(input)?;
 
-    let (input, _) = tag("{")(input)?;
+    let (input, _) = char('{')(input)?;
     let (input, _) = multispace0(input)?; // skip everything between {} of a class for the moment
 
     let (input, methods) = separated_list0(tag("\n"), parse_cpp_method).parse(input)?;
-    let (input, _) = tag("}")(input)?;
+    let (input, _) = char('}')(input)?;
 
     Ok((
         input,

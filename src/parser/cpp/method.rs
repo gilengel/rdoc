@@ -1,4 +1,5 @@
-﻿use crate::parser::cpp::ctype::CType::Path;
+﻿use crate::parser::cpp::comment::{CppComment, parse_cpp_comment};
+use crate::parser::cpp::ctype::CType::Path;
 use crate::parser::cpp::ctype::{CType, parse_cpp_type};
 use crate::parser::cpp::{parse_ws_str, ws};
 use nom::branch::alt;
@@ -7,10 +8,10 @@ use nom::combinator::{map, opt, peek};
 use nom::multi::separated_list0;
 use nom::sequence::delimited;
 use nom::{IResult, Parser, bytes::complete::tag};
-use crate::parser::cpp::comment::{parse_cpp_comment, CppComment};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum CppFunctionInheritance {
+    Static,
     Virtual,
     Override,
     Final,
@@ -19,6 +20,7 @@ pub enum CppFunctionInheritance {
 impl From<&str> for CppFunctionInheritance {
     fn from(input: &str) -> Self {
         match input {
+            "static" => CppFunctionInheritance::Static,
             "virtual" => CppFunctionInheritance::Virtual,
             "override" => CppFunctionInheritance::Override,
             "final" => CppFunctionInheritance::Final,
@@ -34,7 +36,7 @@ pub struct CppFunction<'a> {
     pub params: Vec<CppMethodParam<'a>>,
     pub inheritance_modifiers: Vec<CppFunctionInheritance>,
     pub is_const: bool,
-    pub comment: Option<CppComment>
+    pub comment: Option<CppComment>,
 }
 
 impl<'a> Default for CppFunction<'a> {
@@ -46,7 +48,7 @@ impl<'a> Default for CppFunction<'a> {
             params: vec![],
             inheritance_modifiers: vec![],
             is_const: false,
-            comment: None
+            comment: None,
         }
     }
 }
@@ -130,6 +132,7 @@ pub fn parse_cpp_method(input: &str) -> IResult<&str, CppFunction> {
     let (input, _) = multispace0.parse(input)?;
     let (input, comment) = opt(parse_cpp_comment).parse(input)?;
     let (input, _) = opt(parse_template).parse(input)?;
+    let (input, is_static) = opt(tag("static")).parse(input)?;
     let (input, is_virtual) = opt(tag("virtual")).parse(input)?;
     let (input, _) = multispace0(input)?;
 
@@ -140,8 +143,11 @@ pub fn parse_cpp_method(input: &str) -> IResult<&str, CppFunction> {
     //let (input, _) = char(';').parse(input)?;
     //let (input, _) = multispace0.parse(input)?;
 
-
     let mut inheritance_modifiers = Vec::new();
+
+    if is_static.is_some() {
+        inheritance_modifiers.push(CppFunctionInheritance::Static);
+    }
 
     if is_virtual.is_some() {
         inheritance_modifiers.push(CppFunctionInheritance::Virtual);
@@ -166,7 +172,7 @@ pub fn parse_cpp_method(input: &str) -> IResult<&str, CppFunction> {
             inheritance_modifiers,
             is_const,
             template_params: vec![],
-            comment
+            comment,
         },
     ))
 }
@@ -175,7 +181,7 @@ pub fn parse_cpp_method(input: &str) -> IResult<&str, CppFunction> {
 mod tests {
     use crate::parser::cpp::comment::CppComment;
     use crate::parser::cpp::ctype::CType::{Function, Generic, Path, Pointer, Reference};
-    use crate::parser::cpp::method::CppFunctionInheritance::{Final, Virtual};
+    use crate::parser::cpp::method::CppFunctionInheritance::{Final, Static, Virtual};
     use crate::parser::cpp::method::{
         CppFunction, CppFunctionInheritance, CppMethodParam, parse_cpp_method,
     };
@@ -208,7 +214,9 @@ mod tests {
                 "",
                 CppFunction {
                     name: "method",
-                    comment: Some(CppComment { comment: "does something".to_string() }),
+                    comment: Some(CppComment {
+                        comment: "does something".to_string()
+                    }),
                     ..Default::default()
                 }
             ))
@@ -232,7 +240,9 @@ mod tests {
                 "",
                 CppFunction {
                     name: "method",
-                    comment: Some(CppComment { comment: "does something\n@return nothing".to_string() }),
+                    comment: Some(CppComment {
+                        comment: "does something\n@return nothing".to_string()
+                    }),
                     ..Default::default()
                 }
             ))
@@ -241,11 +251,12 @@ mod tests {
 
     #[test]
     fn test_method_with_virtual_modifier() {
-        for inheritance_modifier in ["", "virtual"] {
+        for inheritance_modifier in ["", "virtual", "static"] {
             let input = format!("{} void method()", inheritance_modifier);
 
             let inheritance_modifiers = match inheritance_modifier {
                 "virtual" => vec![Virtual],
+                "static" => vec![Static],
                 _ => vec![],
             };
 

@@ -489,10 +489,10 @@ fn test_simple_class() {
                     name: "count",
                     ctype: Path(vec!["int"]),
                     default_value: Some(Path(vec!["0"])),
-                    is_const: false,
                     comment: Some(CppComment {
                         comment: "internal counter on how many times others were greeted".to_string(),
                     }),
+                    ..Default::default()
                 }],
             ),
             (

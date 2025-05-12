@@ -123,6 +123,30 @@ fn skip_to_next_line(input: &str) -> IResult<&str, (), nom::error::Error<&str>> 
     let input = input.strip_prefix('\n').unwrap_or(input);
     Ok((input, ()))
 }
+
+pub fn parse_uproperty(input: &str) ->IResult<&str, &str>
+{
+    let (input, _) = (ws(tag("UPROPERTY")), nom::bytes::take_until("\n")).parse(input)?;
+
+    Ok((input, ""))
+}
+
+pub fn parse_ufunction(input: &str) ->IResult<&str, &str>
+{
+    let (input, _) = (ws(tag("UFUNCTION")), nom::bytes::take_until("\n")).parse(input)?;
+
+    Ok((input, ""))
+}
+
+pub fn parse_generate_body(input: &str) ->IResult<&str, &str>
+{
+    let (input, _) =ws(tag("GENERATE_BODY()")).parse(input)?;
+
+    Ok((input, ""))
+}
+pub fn parse_ignore(input: &str) -> IResult<&str, &str> {
+    alt((parse_generate_body, parse_uproperty, parse_ufunction)).parse(input)
+}
 pub fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
     let (input, _) = opt(parse_template).parse(input)?;
     let (input, _) = alt((tag("class"), tag("struct"))).parse(input)?;
@@ -167,6 +191,11 @@ pub fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
     loop {
         let (i, _) = multispace0(input)?;
         input = i;
+
+        if let Ok((next, _)) = parse_ignore(input) {
+            input = next;
+            continue;
+        }
 
         if let Ok((next, _)) = char::<_, nom::error::Error<&str>>(';')(input) {
             input = next;

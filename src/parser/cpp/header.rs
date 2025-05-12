@@ -6,8 +6,11 @@ use nom::character::complete::{char, multispace0};
 use nom::combinator::eof;
 use nom::sequence::{delimited, preceded, terminated};
 use crate::parser::cpp::class::{parse_cpp_class, CppClass};
+use crate::parser::cpp::comment::parse_cpp_comment;
 use crate::parser::cpp::method::{parse_cpp_method, CppFunction};
+use crate::parser::cpp::ws;
 
+#[derive(Debug)]
 pub struct CppHeader<'a> {
     functions: Vec<CppFunction<'a>>,
     classes: Vec<CppClass<'a>>,
@@ -26,8 +29,16 @@ pub fn parse_include(input: &str) -> IResult<&str, &str> {
 
     Ok((input, file))
 }
+
+pub fn parse_uclass(input: &str) -> IResult<&str, &str>
+{
+    let (input, _) = (ws(tag("UCLASS")), take_until("\n")).parse(input)?;
+
+    Ok((input, ""))
+}
+
 pub fn parse_cpp_header(input: &str) -> IResult<&str, CppHeader> {
-    let (mut input, _) = (multispace0, parse_pragma_once, multispace0).parse(input)?;
+    let mut input = input;
 
     let mut classes = Vec::new();
     let mut functions = Vec::new();
@@ -35,7 +46,22 @@ pub fn parse_cpp_header(input: &str) -> IResult<&str, CppHeader> {
         let (i, _) = multispace0(input)?;
         input = i;
 
+        if let Ok((i, _)) = (multispace0, parse_pragma_once, multispace0).parse(input) {
+            input = i;
+            continue;
+        }
+
+        if let Ok((i, _)) = parse_uclass(input) {
+            input = i;
+            continue
+        }
+
         if let Ok((i, _)) = parse_include(input) {
+            input = i;
+            continue
+        }
+
+        if let Ok((i, _)) = parse_cpp_comment(input) {
             input = i;
             continue
         }
@@ -86,6 +112,7 @@ mod tests {
 
             struct Empty{};
 
+            // Say hello to everyone
             void sayHello(){ std::cout << "Hi" << std::endl; };
 
             class FCommonModule : public IModuleInterface

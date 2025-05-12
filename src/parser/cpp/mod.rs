@@ -7,7 +7,7 @@ mod method;
 mod ctype;
 mod comment;
 mod member;
-mod header;
+pub mod header;
 mod namespace;
 mod template;
 

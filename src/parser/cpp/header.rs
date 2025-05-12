@@ -4,9 +4,9 @@ use nom::branch::alt;
 use nom::bytes::take_until;
 use nom::character::complete::{char, multispace0};
 use nom::combinator::eof;
-use nom::sequence::{delimited, preceded};
+use nom::sequence::{delimited, preceded, terminated};
 use crate::parser::cpp::class::{parse_cpp_class, CppClass};
-use crate::parser::cpp::method::CppFunction;
+use crate::parser::cpp::method::{parse_cpp_method, CppFunction};
 
 pub struct CppHeader<'a> {
     functions: Vec<CppFunction<'a>>,
@@ -47,6 +47,12 @@ pub fn parse_cpp_header(input: &str) -> IResult<&str, CppHeader> {
             continue
         }
 
+        if let Ok((i, function)) = terminated(parse_cpp_method, char(';')).parse(input) {
+            functions.push(function);
+
+            input = i;
+            continue
+        }
         if let Ok((i, _)) = eof::<&str, nom::error::Error<&str>>(input) {
             return Ok((i, CppHeader { functions, classes })); // Successfully reached EOF
         }
@@ -61,6 +67,7 @@ pub fn parse_cpp_header(input: &str) -> IResult<&str, CppHeader> {
 #[cfg(test)]
 mod tests {
     use crate::parser::cpp::header::{parse_cpp_header, parse_include};
+    use crate::parser::cpp::method::CppFunction;
 
     #[test]
     fn test_relative_include() {
@@ -79,6 +86,8 @@ mod tests {
 
             struct Empty{};
 
+            void sayHello(){ std::cout << "Hi" << std::endl; };
+
             class FCommonModule : public IModuleInterface
             {
             public:
@@ -90,5 +99,9 @@ mod tests {
         let result = parse_cpp_header(input).unwrap();
         assert_eq!(result.0, "");
         assert_eq!(result.1.classes.len(), 2);
+        assert_eq!(result.1.functions, vec![CppFunction {
+            name: "sayHello",
+            ..Default::default()
+        }])
     }
 }

@@ -4,10 +4,11 @@ use crate::parser::cpp::ctype::{CType, parse_cpp_type};
 use crate::parser::cpp::{parse_ws_str, ws};
 use nom::branch::alt;
 use nom::character::complete::{char, multispace0};
-use nom::combinator::{map, opt, peek};
-use nom::multi::separated_list0;
+use nom::combinator::{map, opt, peek, recognize};
+use nom::multi::{many0, separated_list0};
 use nom::sequence::delimited;
 use nom::{IResult, Parser, bytes::complete::tag};
+use nom::bytes::complete::is_not;
 use crate::parser::cpp::template::parse_template;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -37,6 +38,7 @@ pub struct CppFunction<'a> {
     pub params: Vec<CppMethodParam<'a>>,
     pub inheritance_modifiers: Vec<CppFunctionInheritance>,
     pub is_const: bool,
+    pub is_interface: bool,
     pub comment: Option<CppComment>,
 }
 
@@ -49,6 +51,7 @@ impl<'a> Default for CppFunction<'a> {
             params: vec![],
             inheritance_modifiers: vec![],
             is_const: false,
+            is_interface: false,
             comment: None,
         }
     }
@@ -112,10 +115,26 @@ pub fn parse_trailing_return_method(
 
     Ok((input, (name, return_type, params)))
 }
+
+/// Parses a balanced block of `{...}` including nested ones.
+pub fn parse_brace_block(input: &str) -> IResult<&str, &str> {
+    recognize(
+        delimited(
+            char('{'),
+            many0(alt((
+                parse_brace_block,
+                recognize(is_not("{}")),
+            ))),
+            char('}'),
+        )
+    ).parse(input)
+}
 pub fn parse_cpp_method(input: &str) -> IResult<&str, CppFunction> {
     let (input, _) = multispace0.parse(input)?;
     let (input, comment) = opt(parse_cpp_comment).parse(input)?;
     let (input, _) = opt(parse_template).parse(input)?;
+    let (input, _) = opt(tag("inline")).parse(input)?;
+
     let (input, is_static) = opt(tag("static")).parse(input)?;
     let (input, is_virtual) = opt(tag("virtual")).parse(input)?;
     let (input, _) = multispace0(input)?;
@@ -124,8 +143,11 @@ pub fn parse_cpp_method(input: &str) -> IResult<&str, CppFunction> {
         alt((parse_trailing_return_method, parse_classic_method)).parse(input)?;
 
     let (input, function_params) = separated_list0(tag(","), parse_ws_str).parse(input)?;
-    //let (input, _) = char(';').parse(input)?;
-    //let (input, _) = multispace0.parse(input)?;
+
+    let (input, is_interface) = opt((multispace0, char('='), multispace0, char('0'))).parse(input)?;
+
+    let (input, _) = opt(parse_brace_block).parse(input)?;
+
 
     let mut inheritance_modifiers = Vec::new();
 
@@ -155,6 +177,7 @@ pub fn parse_cpp_method(input: &str) -> IResult<&str, CppFunction> {
             params: function.2,
             inheritance_modifiers,
             is_const,
+            is_interface: is_interface.is_some(),
             template_params: vec![],
             comment,
         },
@@ -173,6 +196,40 @@ mod tests {
     #[test]
     fn test_method_without_params() {
         let input = "void method()";
+        assert_eq!(
+            parse_cpp_method(&input[..]),
+            Ok((
+                "",
+                CppFunction {
+                    name: "method",
+                    ..Default::default()
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_interface_method() {
+        let input = "void method() = 0";
+        assert_eq!(
+            parse_cpp_method(&input[..]),
+            Ok((
+                "",
+                CppFunction {
+                    name: "method",
+                    is_interface: true,
+                    ..Default::default()
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_inline_method_without_params() {
+        let input = r#"void method(){
+            int i=42;
+        }"#;
+
         assert_eq!(
             parse_cpp_method(&input[..]),
             Ok((

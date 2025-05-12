@@ -44,13 +44,13 @@ impl Default for CppClass<'_> {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-struct CppParentClass<'a> {
+pub struct CppParentClass<'a> {
     name: CType<'a>,
     visibility: InheritanceVisibility,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
-enum InheritanceVisibility {
+pub enum InheritanceVisibility {
     Private,
     Protected,
     Public,

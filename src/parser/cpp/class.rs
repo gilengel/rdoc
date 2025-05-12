@@ -1,8 +1,9 @@
 ﻿use crate::parser::cpp::comment::CppComment;
-use crate::parser::cpp::ctype::CType;
-use crate::parser::cpp::member::{parse_cpp_member, CppMember};
+use crate::parser::cpp::ctype::CType::Path;
+use crate::parser::cpp::ctype::{CType, parse_cpp_type};
+use crate::parser::cpp::member::{CppMember, parse_cpp_member};
 use crate::parser::cpp::method::{CppFunction, parse_cpp_method};
-use crate::parser::cpp::parse_ws_str;
+use crate::parser::cpp::{parse_ws_str, ws};
 use nom::branch::alt;
 use nom::bytes::complete::take_until;
 use nom::character::complete::{char, multispace0};
@@ -11,15 +12,15 @@ use nom::multi::separated_list1;
 use nom::sequence::terminated;
 use nom::{IResult, Parser, bytes::complete::tag};
 use std::collections::HashMap;
-use crate::parser::cpp::ctype::CType::Path;
+use crate::parser::cpp::template::parse_template;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct CppClass<'a> {
-    name: &'a str,
-    api: Option<&'a str>,
-    parents: Vec<CppParentClass<'a>>,
-    methods: HashMap<InheritanceVisibility, Vec<CppFunction<'a>>>,
-    members: HashMap<InheritanceVisibility, Vec<CppMember<'a>>>,
+    pub name: &'a str,
+    pub api: Option<&'a str>,
+    pub parents: Vec<CppParentClass<'a>>,
+    pub methods: HashMap<InheritanceVisibility, Vec<CppFunction<'a>>>,
+    pub members: HashMap<InheritanceVisibility, Vec<CppMember<'a>>>,
 }
 
 impl Default for CppClass<'_> {
@@ -44,7 +45,7 @@ impl Default for CppClass<'_> {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 struct CppParentClass<'a> {
-    name: &'a str,
+    name: CType<'a>,
     visibility: InheritanceVisibility,
 }
 
@@ -53,6 +54,7 @@ enum InheritanceVisibility {
     Private,
     Protected,
     Public,
+    Virtual,
     Empty,
 }
 
@@ -62,6 +64,7 @@ impl From<&str> for InheritanceVisibility {
             "private" => InheritanceVisibility::Private,
             "protected" => InheritanceVisibility::Protected,
             "public" => InheritanceVisibility::Public,
+            "virtual" => InheritanceVisibility::Virtual,
             _ => InheritanceVisibility::Empty,
         }
     }
@@ -75,6 +78,7 @@ fn parse_inheritance_visibility(input: &str) -> IResult<&str, InheritanceVisibil
         value(InheritanceVisibility::Private, tag("private")),
         value(InheritanceVisibility::Protected, tag("protected")),
         value(InheritanceVisibility::Public, tag("public")),
+        value(InheritanceVisibility::Virtual, tag("virtual")),
     ))
     // If no match, return Empty without consuming input
     .or(value(
@@ -88,15 +92,9 @@ fn parse_inheritance_visibility(input: &str) -> IResult<&str, InheritanceVisibil
 
 fn parse_single_inheritance(input: &str) -> IResult<&str, CppParentClass> {
     let (input, visibility) = parse_inheritance_visibility(input)?;
-    let (input, parent_name) = parse_ws_str(input)?;
+    let (input, name) = ws(parse_cpp_type).parse(input)?;
 
-    Ok((
-        input,
-        CppParentClass {
-            name: parent_name,
-            visibility,
-        },
-    ))
+    Ok((input, CppParentClass { name, visibility }))
 }
 fn parse_inheritance(input: &str) -> IResult<&str, Vec<CppParentClass>> {
     let (input, _) = multispace0(input)?;
@@ -126,6 +124,7 @@ fn skip_to_next_line(input: &str) -> IResult<&str, (), nom::error::Error<&str>> 
     Ok((input, ()))
 }
 pub fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
+    let (input, _) = opt(parse_template).parse(input)?;
     let (input, _) = alt((tag("class"), tag("struct"))).parse(input)?;
     let (input, maybe_api) = parse_ws_str(input)?;
     let (input, maybe_name_result) = opt(parse_ws_str).parse(input)?;
@@ -134,6 +133,18 @@ pub fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
         Some(name) => (Some(maybe_api), name), // two identifiers → api + name
         None => (None, maybe_api),             // only one → name, no api
     };
+
+    if let Ok((input, empty)) = opt(char::<_, nom::error::Error<&str>> (';')).parse(input) {
+        if empty.is_some() {
+            return Ok((
+                input,
+                CppClass {
+                    name,
+                    ..Default::default()
+                },
+            ));
+        }
+    }
 
     let (input, parents) = opt(parse_inheritance).parse(input)?;
 
@@ -213,10 +224,11 @@ mod tests {
     use crate::parser::cpp::class::{
         CppClass, CppParentClass, InheritanceVisibility, parse_cpp_class,
     };
-    use crate::parser::cpp::ctype::CType;
+
     use crate::parser::cpp::method::CppFunction;
     use rand::Rng;
     use std::collections::HashMap;
+    use crate::parser::cpp::ctype::CType::Path;
 
     fn random_whitespace_string() -> String {
         let mut rng = rand::rng();
@@ -242,7 +254,7 @@ mod tests {
                         name: "test",
                         api: None,
                         parents: vec![CppParentClass {
-                            name: "a",
+                            name: Path(vec!["a"]),
                             visibility: InheritanceVisibility::from(visibility)
                         }],
                         ..CppClass::default()
@@ -268,6 +280,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_empty_templated_struct() {
+        let input = "template<typename T>\nstruct Test {};";
+        assert_eq!(
+            parse_cpp_class(&input[..]),
+            Ok((
+                "",
+                CppClass {
+                    name: "Test",
+                    ..CppClass::default()
+                }
+            ))
+        );
+    }
+
+    #[test]
     fn test_parse_empty_cpp_with_multiple_inheritance_classes() {
         let input = "class test : public a, private b {};";
         assert_eq!(
@@ -279,12 +306,34 @@ mod tests {
                     api: None,
                     parents: vec![
                         CppParentClass {
-                            name: "a",
+                            name: Path(vec!["a"]),
                             visibility: InheritanceVisibility::Public
                         },
                         CppParentClass {
-                            name: "b",
+                            name: Path(vec!["b"]),
                             visibility: InheritanceVisibility::Private
+                        }
+                    ],
+                    ..CppClass::default()
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_parse_empty_cpp_with_namespaced_inheritance_class() {
+        let input = "class test : public namespace::a {};";
+        assert_eq!(
+            parse_cpp_class(&input[..]),
+            Ok((
+                "",
+                CppClass {
+                    name: "test",
+                    api: None,
+                    parents: vec![
+                        CppParentClass {
+                            name: Path(vec!["namespace", "a"]),
+                            visibility: InheritanceVisibility::Public
                         }
                     ],
                     ..CppClass::default()
@@ -372,12 +421,12 @@ mod tests {
                             vec![
                                 CppFunction {
                                     name: "hello",
-                                    return_type: CType::Path(vec!["void"]),
+                                    return_type: Path(vec!["void"]),
                                     ..Default::default()
                                 },
                                 CppFunction {
                                     name: "goodbye",
-                                    return_type: CType::Path(vec!["void"]),
+                                    return_type: Path(vec!["void"]),
                                     ..Default::default()
                                 }
                             ]
@@ -411,7 +460,7 @@ fn test_parse_class_with_multiple_mixed_methods() {
                             },
                             CppFunction {
                                 name: "goodbye",
-                                return_type: CType::Path(vec!["int"]),
+                                return_type: Path(vec!["int"]),
                                 ..Default::default()
                             }
                         ]
@@ -490,19 +539,14 @@ fn test_simple_class() {
                     ctype: Path(vec!["int"]),
                     default_value: Some(Path(vec!["0"])),
                     comment: Some(CppComment {
-                        comment: "internal counter on how many times others were greeted".to_string(),
+                        comment: "internal counter on how many times others were greeted"
+                            .to_string(),
                     }),
                     ..Default::default()
                 }],
             ),
-            (
-                InheritanceVisibility::Protected,
-                vec![],
-            ),
-            (
-                InheritanceVisibility::Public,
-                vec![],
-            ),
+            (InheritanceVisibility::Protected, vec![]),
+            (InheritanceVisibility::Public, vec![]),
         ]),
         ..CppClass::default()
     };

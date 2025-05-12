@@ -8,6 +8,7 @@ use nom::combinator::{map, opt, peek};
 use nom::multi::separated_list0;
 use nom::sequence::delimited;
 use nom::{IResult, Parser, bytes::complete::tag};
+use crate::parser::cpp::template::parse_template;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum CppFunctionInheritance {
@@ -58,23 +59,6 @@ pub struct CppMethodParam<'a> {
     name: Option<&'a str>,
     ctype: CType<'a>,
     is_const: bool,
-}
-
-fn parse_template_param(input: &str) -> IResult<&str, CType> {
-    let (input, _) = ws(alt((tag("typename"), tag("class")))).parse(input)?;
-    let (input, ctype) = parse_cpp_type(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, _) = opt((ws(char('=')), multispace0, parse_cpp_type)).parse(input)?;
-
-    Ok((input, ctype))
-}
-fn parse_template(input: &str) -> IResult<&str, Vec<CType>> {
-    let (input, _) = ws(tag("template")).parse(input)?;
-    let (input, _) = char('<').parse(input)?;
-    let (input, params) = separated_list0(tag(","), parse_template_param).parse(input)?;
-    let (input, _) = ws(char('>')).parse(input)?;
-
-    Ok((input, params))
 }
 fn parse_cpp_method_param(input: &str) -> IResult<&str, CppMethodParam> {
     let (input, is_const) = opt(tag("const")).parse(input)?;

@@ -3,7 +3,7 @@ use nom::character::complete::{char, multispace0};
 use nom::IResult;
 use crate::parser::cpp::class::{parse_cpp_class, CppClass};
 use crate::parser::cpp::comment::parse_cpp_comment;
-use crate::parser::cpp::method::{parse_cpp_method, CppFunction};
+use crate::parser::cpp::method::CppFunction;
 use crate::parser::cpp::parse_ws_str;
 
 #[derive(Debug, PartialEq, Clone, Default)]
@@ -112,6 +112,25 @@ mod tests {
     fn empty_namespace_with_empty_class() {
         let input = r#"namespace test {
             class TestClass {};
+        }"#;
+
+        let expected = Ok(("", CppNamespace {
+            name: "test",
+            classes: vec![CppClass {
+                name: "TestClass",
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+
+        let result = parse_cpp_namespace(input);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn empty_namespace_with_forward_declaration() {
+        let input = r#"namespace test {
+            class TestClass;
         }"#;
 
         let expected = Ok(("", CppNamespace {

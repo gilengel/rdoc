@@ -56,17 +56,17 @@ pub fn parse_cpp_header(input: &str) -> IResult<&str, CppHeader> {
             continue
         }
 
-        if let Ok((i, _)) = parse_include(input) {
+        if let Ok((i, _)) =  preceded(multispace0, parse_include).parse(input) {
             input = i;
             continue
         }
 
-        if let Ok((i, _)) = parse_cpp_comment(input) {
+        if let Ok((i, _)) = preceded(multispace0, parse_cpp_comment).parse(input) {
             input = i;
             continue
         }
 
-        if let Ok((i, class)) = parse_cpp_class(input) {
+        if let Ok((i, class)) = preceded(multispace0, parse_cpp_class).parse(input) {
             classes.push(class);
 
             input = i;
@@ -79,12 +79,13 @@ pub fn parse_cpp_header(input: &str) -> IResult<&str, CppHeader> {
             input = i;
             continue
         }
+
         if let Ok((i, _)) = eof::<&str, nom::error::Error<&str>>(input) {
             return Ok((i, CppHeader { functions, classes })); // Successfully reached EOF
         }
 
         return Err(nom::Err::Error(nom::error::Error::new(
-            input,
+            i,
             nom::error::ErrorKind::Tag,
         )))
     }
@@ -113,7 +114,7 @@ mod tests {
             struct Empty{};
 
             // Say hello to everyone
-            void sayHello(){ std::cout << "Hi" << std::endl; };
+            void sayHello();
 
             class FCommonModule : public IModuleInterface
             {

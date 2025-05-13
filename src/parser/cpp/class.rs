@@ -3,16 +3,16 @@ use crate::parser::cpp::ctype::CType::Path;
 use crate::parser::cpp::ctype::{CType, parse_cpp_type};
 use crate::parser::cpp::member::{CppMember, parse_cpp_member};
 use crate::parser::cpp::method::{CppFunction, parse_cpp_method};
+use crate::parser::cpp::template::parse_template;
 use crate::parser::cpp::{parse_ws_str, ws};
 use nom::branch::alt;
 use nom::bytes::complete::take_until;
 use nom::character::complete::{char, multispace0};
 use nom::combinator::{map, opt, value};
 use nom::multi::separated_list1;
-use nom::sequence::terminated;
+use nom::sequence::{delimited, preceded, terminated};
 use nom::{IResult, Parser, bytes::complete::tag};
 use std::collections::HashMap;
-use crate::parser::cpp::template::parse_template;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct CppClass<'a> {
@@ -124,23 +124,20 @@ fn skip_to_next_line(input: &str) -> IResult<&str, (), nom::error::Error<&str>> 
     Ok((input, ()))
 }
 
-pub fn parse_uproperty(input: &str) ->IResult<&str, &str>
-{
+pub fn parse_uproperty(input: &str) -> IResult<&str, &str> {
     let (input, _) = (ws(tag("UPROPERTY")), nom::bytes::take_until("\n")).parse(input)?;
 
     Ok((input, ""))
 }
 
-pub fn parse_ufunction(input: &str) ->IResult<&str, &str>
-{
+pub fn parse_ufunction(input: &str) -> IResult<&str, &str> {
     let (input, _) = (ws(tag("UFUNCTION")), nom::bytes::take_until("\n")).parse(input)?;
 
     Ok((input, ""))
 }
 
-pub fn parse_generate_body(input: &str) ->IResult<&str, &str>
-{
-    let (input, _) =ws(tag("GENERATE_BODY()")).parse(input)?;
+pub fn parse_generate_body(input: &str) -> IResult<&str, &str> {
+    let (input, _) = ws(tag("GENERATE_BODY()")).parse(input)?;
 
     Ok((input, ""))
 }
@@ -158,7 +155,21 @@ pub fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
         None => (None, maybe_api),             // only one → name, no api
     };
 
-    if let Ok((input, empty)) = opt(char::<_, nom::error::Error<&str>> (';')).parse(input) {
+    // ignore template specialisation atm
+    let mut input = input;
+    if let Ok((i, _)) = opt(delimited(
+        char::<_, nom::error::Error<&str>>('<'),
+        take_until(">"),
+        char('>'),
+    ))
+    .parse(input)
+    {
+        input = i;
+    }
+    let (input, _) = multispace0(input)?;
+
+    // Return early for empty classes (e.g. forward declaration)
+    if let Ok((input, empty)) = opt(char::<_, nom::error::Error<&str>>(';')).parse(input) {
         if empty.is_some() {
             return Ok((
                 input,
@@ -223,6 +234,9 @@ pub fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
         }
 
         if let Ok((next_input, method)) = parse_cpp_method(input) {
+            let (next_input, _) = opt(preceded(ws(char(':')), take_until("{").or(take_until(";"))))
+                .parse(next_input)?;
+
             methods.get_mut(&current_access).unwrap().push(method);
             input = next_input;
             continue;
@@ -254,10 +268,10 @@ mod tests {
         CppClass, CppParentClass, InheritanceVisibility, parse_cpp_class,
     };
 
+    use crate::parser::cpp::ctype::CType::Path;
     use crate::parser::cpp::method::CppFunction;
     use rand::Rng;
     use std::collections::HashMap;
-    use crate::parser::cpp::ctype::CType::Path;
 
     fn random_whitespace_string() -> String {
         let mut rng = rand::rng();
@@ -294,6 +308,24 @@ mod tests {
     }
 
     #[test]
+    fn test_ignore_template_specialisation() {
+        let input = r#"template<>
+        struct Test<int>
+        {
+        };"#;
+        assert_eq!(
+            parse_cpp_class(input),
+            Ok((
+                "",
+                CppClass {
+                    name: "Test",
+                    ..CppClass::default()
+                }
+            ))
+        );
+    }
+
+    #[test]
     fn test_parse_empty_struct() {
         let input = "struct Test {};";
         assert_eq!(
@@ -302,6 +334,35 @@ mod tests {
                 "",
                 CppClass {
                     name: "Test",
+                    ..CppClass::default()
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_parse_struct_with_constructor() {
+        let input = r#"struct Test
+        {
+            Test(){};
+        };"#;
+        assert_eq!(
+            parse_cpp_class(&input[..]),
+            Ok((
+                "",
+                CppClass {
+                    name: "Test",
+                    methods: HashMap::from([
+                        (
+                            InheritanceVisibility::Private,
+                            vec![CppFunction {
+                                name: "Test",
+                                ..Default::default()
+                            }]
+                        ),
+                        (InheritanceVisibility::Protected, vec![]),
+                        (InheritanceVisibility::Public, vec![]),
+                    ]),
                     ..CppClass::default()
                 }
             ))
@@ -359,12 +420,75 @@ mod tests {
                 CppClass {
                     name: "test",
                     api: None,
-                    parents: vec![
-                        CppParentClass {
-                            name: Path(vec!["namespace", "a"]),
-                            visibility: InheritanceVisibility::Public
-                        }
-                    ],
+                    parents: vec![CppParentClass {
+                        name: Path(vec!["namespace", "a"]),
+                        visibility: InheritanceVisibility::Public
+                    }],
+                    ..CppClass::default()
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_parse_class_with_empty_constructor() {
+        let input = r#"class test {
+            public:
+                test();
+        };"#;
+        assert_eq!(
+            parse_cpp_class(&input[..]),
+            Ok((
+                "",
+                CppClass {
+                    name: "test",
+                    methods: HashMap::from([
+                        (
+                            InheritanceVisibility::Public,
+                            vec![CppFunction {
+                                name: "test",
+                                ..Default::default()
+                            }]
+                        ),
+                        (InheritanceVisibility::Protected, vec![]),
+                        (InheritanceVisibility::Private, vec![]),
+                    ]),
+                    ..CppClass::default()
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_parse_class_with_inline_constructor() {
+        let input = r#"class test {
+            public:
+                test()
+                {
+                    int j = 42;
+                    for(int i = 0; i < j; i++)
+                    {
+                        std::cout << j << std::endl;
+                    }
+                }
+        };"#;
+        assert_eq!(
+            parse_cpp_class(&input[..]),
+            Ok((
+                "",
+                CppClass {
+                    name: "test",
+                    methods: HashMap::from([
+                        (
+                            InheritanceVisibility::Public,
+                            vec![CppFunction {
+                                name: "test",
+                                ..Default::default()
+                            }]
+                        ),
+                        (InheritanceVisibility::Protected, vec![]),
+                        (InheritanceVisibility::Private, vec![]),
+                    ]),
                     ..CppClass::default()
                 }
             ))
@@ -411,7 +535,9 @@ mod tests {
 
     #[test]
     fn test_parse_class_with_method() {
-        let input = "class test {\nvoid hello();\n};";
+        let input = r#"class test {
+                void hello();
+            };"#;
         assert_eq!(
             parse_cpp_class(&input[..]),
             Ok((
@@ -450,12 +576,12 @@ mod tests {
                             vec![
                                 CppFunction {
                                     name: "hello",
-                                    return_type: Path(vec!["void"]),
+                                    return_type: None,
                                     ..Default::default()
                                 },
                                 CppFunction {
                                     name: "goodbye",
-                                    return_type: Path(vec!["void"]),
+                                    return_type: None,
                                     ..Default::default()
                                 }
                             ]
@@ -489,7 +615,7 @@ fn test_parse_class_with_multiple_mixed_methods() {
                             },
                             CppFunction {
                                 name: "goodbye",
-                                return_type: Path(vec!["int"]),
+                                return_type: Some(Path(vec!["int"])),
                                 ..Default::default()
                             }
                         ]

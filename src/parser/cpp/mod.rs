@@ -2,13 +2,13 @@
 use nom::character::complete::{multispace0, one_of};
 use nom::{IResult, Parser, error::ParseError, sequence::delimited};
 
-mod class;
-mod method;
-mod ctype;
+pub mod class;
+pub mod method;
+pub mod ctype;
 mod comment;
-mod member;
+pub mod member;
 pub mod header;
-mod namespace;
+pub mod namespace;
 mod template;
 
 pub fn ws<'a, O, E: ParseError<&'a str>, F>(inner: F) -> impl Parser<&'a str, Output = O, Error = E>
@@ -29,6 +29,13 @@ fn extended_identifier<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a st
 
 fn parse_str<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, &'a str, E> {
     escaped(extended_identifier::<E>, '\\', one_of("\"n\\")).parse(i)
+}
+
+fn is_type_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '-' || c == ':' || c == '<' || c == '>'
+}
+fn parse_type_str<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, &'a str, E> {
+    escaped(take_while1(is_type_char), '\\', one_of("\"n\\")).parse(i)
 }
 
 fn parse_ws_str<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, &'a str, E> {

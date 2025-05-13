@@ -26,6 +26,15 @@ pub enum CppMemberModifier {
     Inline,
 }
 
+impl Into<String> for CppMemberModifier {
+    fn into(self) -> String {
+        match self {
+            CppMemberModifier::Static => "static".to_string(),
+            CppMemberModifier::Const => "const".to_string(),
+            CppMemberModifier::Inline => "inline".to_string(),
+        }
+    }
+}
 impl From<&str> for CppMemberModifier {
     fn from(value: &str) -> Self {
         match value {

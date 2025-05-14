@@ -1,14 +1,14 @@
 ﻿use crate::parser::cpp::comment::{CppComment, parse_cpp_comment};
 use crate::parser::cpp::ctype::{CType, parse_cpp_type};
+use crate::parser::cpp::template::parse_template;
 use crate::parser::cpp::{parse_type_str, parse_ws_str, ws};
 use nom::branch::alt;
-use nom::character::complete::{char, multispace0};
-use nom::combinator::{map, opt, peek};
-use nom::multi::{separated_list0, separated_list1};
+use nom::bytes::complete::{take_till1, take_until};
+use nom::character::complete::{char, multispace0, none_of};
+use nom::combinator::{map, opt, peek, recognize};
+use nom::multi::{many0, separated_list0, separated_list1};
 use nom::sequence::{delimited, preceded};
 use nom::{IResult, Parser, bytes::complete::tag};
-use nom::bytes::complete::take_until;
-use crate::parser::cpp::template::parse_template;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum CppFunctionInheritance {
@@ -88,27 +88,39 @@ pub fn parse_method_params(input: &str) -> IResult<&str, Vec<CppMethodParam>> {
             parse_cpp_method_param,
         ),
     ))
-        .parse(input)?;
+    .parse(input)?;
 
     let (input, _) = delimited(multispace0, char(')'), multispace0).parse(input)?;
 
     Ok((input, params))
 }
 
-/// Parses a balanced block of `{...}` including nested ones.
+fn parse_brace_inner(input: &str) -> IResult<&str, &str> {
+    recognize(many0(alt((
+        // Match and recurse into nested braces
+        parse_brace_block,
+        // Match any non-brace characters
+        recognize(take_till1(|c| c == '{' || c == '}')),
+        // Match single braces (not part of a block)
+        recognize(none_of("{}")),
+    ))))
+    .parse(input)
+}
+
+/// Matches a balanced block like `{ ... }`, including nested ones.
 pub fn parse_brace_block(input: &str) -> IResult<&str, &str> {
-    let (input, _) = multispace0(input)?;
-    let (input, _) = char('{')(input)?;
-    let (input, _) = take_until("{").or(take_until("}")).parse(input)?;
-
-    // parse nested braces
-    let (input, _) = opt(parse_brace_block).parse(input)?;
-
-    let (input, _) = multispace0(input)?;
-    let (input, _) = char('}')(input)?;
+    map(
+        recognize(delimited(char('{'), parse_brace_inner, char('}'))),
+        |_| "",
+    )
+    .parse(input)
+}
+fn interface(input: &str) -> IResult<&str, &str> {
+    let (input, _) = (multispace0, char('='), multispace0, char('0')).parse(input)?;
 
     Ok((input, ""))
 }
+
 pub fn parse_cpp_method(input: &str) -> IResult<&str, CppFunction> {
     let (input, _) = multispace0.parse(input)?;
     let (input, comment) = opt(parse_cpp_comment).parse(input)?;
@@ -116,17 +128,20 @@ pub fn parse_cpp_method(input: &str) -> IResult<&str, CppFunction> {
     let (input, _) = opt(parse_template).parse(input)?;
 
     let (input, all_before_params) = take_until("(").parse(input)?;
-    let (_, all_before_params) = separated_list1(tag(" "), parse_type_str).parse(all_before_params)?;
-    let all_before_params = all_before_params.iter().filter(|x| **x != "").map(|x| *x).collect::<Vec<&str>>();
+
+    let (_, all_before_params) =
+        separated_list1(tag(" "), parse_type_str).parse(all_before_params)?;
+    let all_before_params = all_before_params
+        .iter()
+        .filter(|x| **x != "")
+        .map(|x| *x)
+        .collect::<Vec<&str>>();
 
     let mut return_type = None;
-    let name : &str = all_before_params.last().unwrap();
+    let name: &str = all_before_params.last().unwrap();
 
     // we eiter have auto {method_name} or {return_type} {method_name} -> no constructor
-    if all_before_params.len() > 1 {
-
-    }
-
+    if all_before_params.len() > 1 {}
 
     let (mut input, params) = ws(parse_method_params).parse(input)?;
 
@@ -135,28 +150,24 @@ pub fn parse_cpp_method(input: &str) -> IResult<&str, CppFunction> {
         input = i;
 
         return_type = Some(ctype);
-    }else if all_before_params.len() > 1 {
-        let ctype = all_before_params[all_before_params.len()-2];
+    } else if all_before_params.len() > 1 {
+        let ctype = all_before_params[all_before_params.len() - 2];
         let ctype = parse_cpp_type.parse(ctype)?.1;
-
 
         return_type = Some(ctype);
     }
 
-    if return_type == Some(CType::Path(vec!["void"]))
-    {
+    if return_type == Some(CType::Path(vec!["void"])) {
         return_type = None;
     }
 
     let (input, _) = multispace0(input)?;
 
-
     let (input, function_params) = separated_list0(tag(","), parse_ws_str).parse(input)?;
 
-    let (input, is_interface) = opt((multispace0, char('='), multispace0, char('0'))).parse(input)?;
+    let (input, is_interface) = opt(interface).parse(input)?;
 
     let (input, _) = opt(parse_brace_block).parse(input)?;
-
 
     let mut inheritance_modifiers = Vec::new();
 
@@ -198,7 +209,21 @@ mod tests {
     use crate::parser::cpp::comment::CppComment;
     use crate::parser::cpp::ctype::CType::{Function, Generic, Path, Pointer, Reference};
     use crate::parser::cpp::method::CppFunctionInheritance::{Final, Static, Virtual};
-    use crate::parser::cpp::method::{CppFunction, CppFunctionInheritance, CppMethodParam, parse_cpp_method, parse_brace_block};
+    use crate::parser::cpp::method::{
+        CppFunction, CppFunctionInheritance, CppMethodParam, parse_brace_block, parse_cpp_method,
+    };
+
+    #[test]
+    fn test_empty_braces() {
+        let input = "{}";
+        assert_eq!(parse_brace_block(&input), Ok(("", "")));
+    }
+
+    #[test]
+    fn test_only_braces() {
+        let input = "{} CONTENT {}";
+        assert_eq!(parse_brace_block(&input), Ok((" CONTENT {}", "")));
+    }
 
     #[test]
     fn test_parse_nested_braces() {
@@ -271,13 +296,14 @@ mod tests {
                 "",
                 CppFunction {
                     name: "sayHello",
-                    comment: Some(CppComment{comment: "Say hello to everyone".to_string()}),
+                    comment: Some(CppComment {
+                        comment: "Say hello to everyone".to_string()
+                    }),
                     ..Default::default()
                 }
             ))
         );
     }
-
 
     #[test]
     fn test_method_with_single_line_comment() {
@@ -622,7 +648,7 @@ mod tests {
                         name: Some("a"),
                         ctype: Path(vec!["Integer"]),
                         is_const: false
-                    }, ],
+                    },],
                     ..Default::default()
                 }
             ))
@@ -643,7 +669,7 @@ mod tests {
                         name: None,
                         ctype: Path(vec!["int"]),
                         is_const: false
-                    }, ],
+                    },],
                     ..Default::default()
                 }
             ))

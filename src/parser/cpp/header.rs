@@ -1,14 +1,14 @@
-﻿use nom::bytes::complete::tag;
-use nom::{IResult, Parser};
+﻿use crate::parser::cpp::class::{CppClass, parse_cpp_class};
+use crate::parser::cpp::comment::parse_cpp_comment;
+use crate::parser::cpp::method::{CppFunction, parse_cpp_method};
+use crate::parser::cpp::ws;
 use nom::branch::alt;
+use nom::bytes::complete::tag;
 use nom::bytes::take_until;
 use nom::character::complete::{char, multispace0};
-use nom::combinator::eof;
+use nom::combinator::{eof, opt};
 use nom::sequence::{delimited, preceded, terminated};
-use crate::parser::cpp::class::{parse_cpp_class, CppClass};
-use crate::parser::cpp::comment::parse_cpp_comment;
-use crate::parser::cpp::method::{parse_cpp_method, CppFunction};
-use crate::parser::cpp::ws;
+use nom::{IResult, Parser};
 
 #[derive(Debug)]
 pub struct CppHeader<'a> {
@@ -30,8 +30,7 @@ pub fn parse_include(input: &str) -> IResult<&str, &str> {
     Ok((input, file))
 }
 
-pub fn parse_uclass(input: &str) -> IResult<&str, &str>
-{
+pub fn parse_uclass(input: &str) -> IResult<&str, &str> {
     let (input, _) = (ws(tag("UCLASS")), take_until("\n")).parse(input)?;
 
     Ok((input, ""))
@@ -53,31 +52,32 @@ pub fn parse_cpp_header(input: &str) -> IResult<&str, CppHeader> {
 
         if let Ok((i, _)) = parse_uclass(input) {
             input = i;
-            continue
+            continue;
         }
 
-        if let Ok((i, _)) =  preceded(multispace0, parse_include).parse(input) {
+        if let Ok((i, _)) = preceded(multispace0, parse_include).parse(input) {
             input = i;
-            continue
+            continue;
         }
 
         if let Ok((i, _)) = preceded(multispace0, parse_cpp_comment).parse(input) {
             input = i;
-            continue
+            continue;
         }
 
         if let Ok((i, class)) = preceded(multispace0, parse_cpp_class).parse(input) {
             classes.push(class);
 
             input = i;
-            continue
+            continue;
         }
 
-        if let Ok((i, function)) = terminated(parse_cpp_method, char(';')).parse(input) {
+        if let Ok((i, function)) = terminated(parse_cpp_method, opt(char(';'))).parse(input) {
             functions.push(function);
 
             input = i;
-            continue
+
+            continue;
         }
 
         if let Ok((i, _)) = eof::<&str, nom::error::Error<&str>>(input) {
@@ -87,7 +87,7 @@ pub fn parse_cpp_header(input: &str) -> IResult<&str, CppHeader> {
         return Err(nom::Err::Error(nom::error::Error::new(
             i,
             nom::error::ErrorKind::Tag,
-        )))
+        )));
     }
 }
 
@@ -104,7 +104,6 @@ mod tests {
         assert_eq!(result, Ok(("", "CoreMinimal.h")));
     }
 
-
     #[test]
     fn test_simple_header() {
         let input = r#"#pragma once
@@ -114,7 +113,7 @@ mod tests {
             struct Empty{};
 
             // Say hello to everyone
-            void sayHello();
+            void sayHello(){}
 
             class FCommonModule : public IModuleInterface
             {
@@ -127,9 +126,12 @@ mod tests {
         let result = parse_cpp_header(input).unwrap();
         assert_eq!(result.0, "");
         assert_eq!(result.1.classes.len(), 2);
-        assert_eq!(result.1.functions, vec![CppFunction {
-            name: "sayHello",
-            ..Default::default()
-        }])
+        assert_eq!(
+            result.1.functions,
+            vec![CppFunction {
+                name: "sayHello",
+                ..Default::default()
+            }]
+        )
     }
 }

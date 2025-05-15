@@ -12,6 +12,7 @@ use nom::{
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum CType<'a> {
+    Auto,
     Path(Vec<&'a str>),                       // std::enable_if_t
     Generic(Box<CType<'a>>, Vec<CType<'a>>),  // std::vector<int>
     Function(Box<CType<'a>>, Vec<CType<'a>>), // return‐type + params
@@ -35,9 +36,13 @@ fn identifier(input: &str) -> IResult<&str, &str> {
 }
 
 fn path(input: &str) -> IResult<&str, CType> {
-    let (input, ctype) = map(separated_list0(tag("::"), identifier), CType::Path).parse(input)?;
-
-    Ok((input, ctype))
+    map(separated_list0(tag("::"), identifier), |x| {
+        match x.len() == 1 && x[0] == "auto" {
+            true => CType::Auto,
+            false => CType::Path(x),
+        }
+    })
+    .parse(input)
 }
 
 fn parse_generics<'a>(input: &'a str, ty: CType<'a>) -> IResult<&'a str, CType<'a>> {

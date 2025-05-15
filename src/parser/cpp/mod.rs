@@ -10,6 +10,7 @@ pub mod member;
 pub mod header;
 pub mod namespace;
 mod template;
+mod variable;
 
 pub fn ws<'a, O, E: ParseError<&'a str>, F>(inner: F) -> impl Parser<&'a str, Output = O, Error = E>
 where

@@ -50,22 +50,21 @@ fn parse_generics<'a>(
     input: &'a str,
     ty: CType<'a>,
 ) -> IResult<&'a str, CType<'a>, VerboseError<&'a str>> {
-    opt(delimited(
+    let (input, opt_generics) = opt(delimited(
         preceded(multispace0, char('<')),
         separated_list0(
             preceded(multispace0, char(',')),
-            preceded(multispace0, parse_cpp_type),
+            preceded(multispace0, parse_type),
         ),
         preceded(multispace0, char('>')),
-    ))
-    .parse(input)
-    .map(|(rest, args_opt)| {
-        let out = match args_opt {
-            Some(args) => CType::Generic(Box::new(ty), args),
-            None => ty,
-        };
-        (rest, out)
-    })
+    )).parse(input)?;
+
+    let out = match opt_generics {
+        Some(args) => CType::Generic(Box::new(ty), args),
+        None => ty,
+    };
+
+    Ok((input, out))
 }
 
 fn parse_member_access<'a>(input: &'a str, mut ty: CType<'a>) -> IResult<&'a str, CType<'a>, VerboseError<&'a str>> {
@@ -114,27 +113,28 @@ fn parse_ptrs_refs<'a>(
     Ok((input, ty))
 }
 
+
+fn parse_type(input: &str) -> IResult<&str, CType, VerboseError<&str>> {
+    let (input, base) = parse_type_atom(input)?;
+    let (input, base) = parse_generics(input, base)?;
+    let (input, base) = parse_member_access(input, base)?;
+    let (input, base) = parse_function(input, base)?;
+    let (input, base) = parse_ptrs_refs(base, input)?;
+    Ok((input, base))
+}
+
 fn parse_type_atom(input: &str) -> IResult<&str, CType, VerboseError<&str>> {
-    // First, parse path
-    let (input, ctype) = path(input)?;
-
-    // Recurse into optional generics
-    let (input, ctype) = parse_generics(input, ctype)?;
-
-    // Recurse into optional member accesses
-    let (input, ctype) = parse_member_access(input, ctype)?;
-
-    // Handle function type like T(A, B)
-    let (input, ctype) = parse_function(input, ctype)?;
-
-    // Parse any trailing pointers/references
-    let (input, ctype) = parse_ptrs_refs(ctype, input)?;
-
-    Ok((input, ctype))
+    map(separated_list0(tag("::"), identifier), |segments| {
+        if segments.len() == 1 && segments[0] == "auto" {
+            CType::Auto
+        } else {
+            CType::Path(segments)
+        }
+    }).parse(input)
 }
 
 pub fn parse_cpp_type(input: &str) -> IResult<&str, CType, VerboseError<&str>> {
-    parse_type_atom(input)
+    parse_type(input)
 }
 
 #[cfg(test)]

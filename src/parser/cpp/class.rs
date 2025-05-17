@@ -1,7 +1,7 @@
 ﻿use crate::parser::cpp::comment::CppComment;
 use crate::parser::cpp::ctype::CType::Path;
 use crate::parser::cpp::ctype::{CType, parse_cpp_type};
-use crate::parser::cpp::member::{CppMember, parse_cpp_member};
+use crate::parser::cpp::member::CppMember;
 use crate::parser::cpp::method::CppFunction;
 use crate::parser::cpp::template::parse_template;
 use crate::parser::{parse_ws_str, ws};
@@ -10,11 +10,11 @@ use nom::branch::alt;
 use nom::bytes::complete::take_until;
 use nom::character::complete::{char, multispace0};
 use nom::combinator::{map, opt, value};
-use nom::multi::separated_list1;
+use nom::multi::{many_till, separated_list1};
 use nom::sequence::{delimited, preceded, terminated};
 use nom::{IResult, Parser, bytes::complete::tag};
-use std::collections::HashMap;
 use nom_language::error::VerboseError;
+use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct CppClass<'a> {
@@ -23,6 +23,7 @@ pub struct CppClass<'a> {
     pub parents: Vec<CppParentClass<'a>>,
     pub methods: HashMap<InheritanceVisibility, Vec<CppFunction<'a>>>,
     pub members: HashMap<InheritanceVisibility, Vec<CppMember<'a>>>,
+    pub inner_classes: HashMap<InheritanceVisibility, Vec<CppClass<'a>>>,
 }
 
 impl Default for CppClass<'_> {
@@ -41,15 +42,53 @@ impl Default for CppClass<'_> {
                 (InheritanceVisibility::Protected, vec![]),
                 (InheritanceVisibility::Private, vec![]),
             ]),
+            inner_classes: HashMap::from([
+                (InheritanceVisibility::Public, vec![]),
+                (InheritanceVisibility::Protected, vec![]),
+                (InheritanceVisibility::Private, vec![]),
+            ]),
         }
     }
 }
 
-impl<'a> Parsable<'a> for CppClass<'a>
-{
+#[derive(Debug, PartialEq, Clone)]
+enum CppClassItem<'a> {
+    Ignore,
+    Access(InheritanceVisibility),
+    Method(CppFunction<'a>),
+    Member(CppMember<'a>),
+    Class(CppClass<'a>),
+    End, // matched on `}` (+ optional `;`)
+}
+
+fn parse_class_item(input: &str) -> IResult<&str, CppClassItem, VerboseError<&str>> {
+    let (input, item) = preceded(
+        multispace0,
+        alt((
+            map(parse_ignore, |_| CppClassItem::Ignore),
+            map(char(';'), |_| CppClassItem::Ignore),
+            map(access_specifier, CppClassItem::Access),
+            map(<CppClass as Parsable>::parse, CppClassItem::Class),
+            map(<CppFunction as Parsable>::parse, CppClassItem::Method),
+            map(<CppMember as Parsable>::parse, CppClassItem::Member),
+            map(preceded(char('}'), opt(char(';'))), |_| CppClassItem::End),
+        )),
+    )
+    .parse(input)?;
+
+    Ok((input, item))
+}
+fn parse_class_identifier(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
+    alt((tag("class"), tag("struct"))).parse(input)
+}
+
+fn parse_ignore_template(input: &str) -> IResult<&str, Option<&str>, VerboseError<&str>> {
+    opt(delimited(char('<'), take_until(">"), char('>'))).parse(input)
+}
+impl<'a> Parsable<'a> for CppClass<'a> {
     fn parse(input: &'a str) -> IResult<&'a str, Self, VerboseError<&'a str>> {
         let (input, _) = opt(parse_template).parse(input)?;
-        let (input, _) = alt((tag("class"), tag("struct"))).parse(input)?;
+        let (input, _) = parse_class_identifier(input)?;
         let (input, maybe_api) = parse_ws_str(input)?;
         let (input, maybe_name_result) = opt(parse_ws_str).parse(input)?;
 
@@ -59,115 +98,64 @@ impl<'a> Parsable<'a> for CppClass<'a>
         };
 
         // ignore template specialisation atm
-        let mut input = input;
-        if let Ok((i, _)) = opt(delimited(
-            char::<_, nom::error::Error<&str>>('<'),
-            take_until(">"),
-            char('>'),
-        ))
-        .parse(input)
-        {
-            input = i;
-        }
+        let input = match parse_ignore_template(input) {
+            Ok((ignored, _)) => ignored,
+            Err(_) => input,
+        };
         let (input, _) = multispace0(input)?;
 
+        let mut class = CppClass::default();
+
         // Return early for empty classes (e.g. forward declaration)
-        if let Ok((input, empty)) = opt(char::<_, nom::error::Error<&str>>(';')).parse(input) {
-            if empty.is_some() {
-                return Ok((
-                    input,
-                    CppClass {
-                        name,
-                        ..Default::default()
-                    },
-                ));
-            }
+        let (input, empty) = opt(char::<_, VerboseError<&str>>(';')).parse(input)?;
+        if empty.is_some() {
+            class.name = name;
+            return Ok((input, class));
         }
 
         let (input, parents) = opt(parse_inheritance).parse(input)?;
 
-        let mut methods: HashMap<InheritanceVisibility, Vec<CppFunction>> = HashMap::from([
-            (InheritanceVisibility::Private, vec![]),
-            (InheritanceVisibility::Protected, vec![]),
-            (InheritanceVisibility::Public, vec![]),
-        ]);
+        class.name = name;
+        class.parents = parents.unwrap_or_default();
+        class.api = api;
 
-        let mut members: HashMap<InheritanceVisibility, Vec<CppMember>> = HashMap::from([
-            (InheritanceVisibility::Private, vec![]),
-            (InheritanceVisibility::Protected, vec![]),
-            (InheritanceVisibility::Public, vec![]),
-        ]);
-
+        // now parse the body
         let (input, _) = char('{')(input)?;
-        let (mut input, _) = multispace0(input)?; // skip everything between {} of a class for the moment
-
         let mut current_access = InheritanceVisibility::Private;
-        loop {
-            let (i, _) = multispace0(input)?;
-            input = i;
-
-            if let Ok((next, _)) = parse_ignore(input) {
-                input = next;
-                continue;
-            }
-
-            if let Ok((next, _)) = char::<_, nom::error::Error<&str>>(';')(input) {
-                input = next;
-                continue;
-            }
-
-            if let Ok((next, _)) = char::<_, nom::error::Error<&str>>('}')(input) {
-                let (rest, _) = opt(char(';')).parse(next)?;
-                return Ok((
-                    rest,
-                    CppClass {
-                        name,
-                        api,
-                        parents: parents.unwrap_or(vec![]),
-                        methods,
-                        members,
-                    },
-                ));
-            }
-
-            if let Ok((next_input, access)) = access_specifier(input) {
-                current_access = access;
-                input = next_input;
-                continue;
-            }
-
-            if let Ok((next_input, method)) = CppFunction::parse(input) {
-                let (next_input, _) =
-                    opt(preceded(ws(char(':')), take_until("{").or(take_until(";"))))
-                        .parse(next_input)?;
-
-                methods.get_mut(&current_access).unwrap().push(method);
-                input = next_input;
-                continue;
-            }
-
-            if let Ok((next_input, member)) = parse_cpp_member(input) {
-                members.get_mut(&current_access).unwrap().push(member);
-                input = next_input;
-                continue;
-            }
-
-            // Skip unknown or unsupported lines (e.g., whitespace or preprocessor)
-            if let Ok((next_input, _)) = skip_to_next_line(input) {
-                input = next_input;
-            } else {
-                break;
+        let (input, (items, _)) =
+            many_till(parse_class_item, preceded(multispace0, char('}'))).parse(input)?;
+        for item in items {
+            match item {
+                CppClassItem::Access(a) => current_access = a,
+                CppClassItem::Method(m) => class
+                    .methods
+                    .entry(current_access.clone())
+                    .or_default()
+                    .push(m),
+                CppClassItem::Member(mem) => class
+                    .members
+                    .entry(current_access.clone())
+                    .or_default()
+                    .push(mem),
+                CppClassItem::Class(inner_class) => class
+                    .inner_classes
+                    .entry(current_access.clone())
+                    .or_default()
+                    .push(inner_class),
+                _ => {}
             }
         }
 
-        Err(nom::Err::Error(nom_language::error::VerboseError { errors: vec![] }))
+        let (input, _) = opt(char(';')).parse(input)?;
+
+        Ok((input, class))
     }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct CppParentClass<'a> {
-    name: CType<'a>,
-    visibility: InheritanceVisibility,
+    pub name: CType<'a>,
+    pub visibility: InheritanceVisibility,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
@@ -191,7 +179,9 @@ impl From<&str> for InheritanceVisibility {
     }
 }
 
-fn parse_inheritance_visibility(input: &str) -> IResult<&str, InheritanceVisibility, VerboseError<&str>> {
+fn parse_inheritance_visibility(
+    input: &str,
+) -> IResult<&str, InheritanceVisibility, VerboseError<&str>> {
     let (input, _) = multispace0(input)?;
 
     // Try to match one of the known keywords
@@ -226,7 +216,7 @@ fn parse_inheritance(input: &str) -> IResult<&str, Vec<CppParentClass>, VerboseE
     Ok((input, parent_classes))
 }
 
-fn access_specifier(input: &str) -> IResult<&str, InheritanceVisibility> {
+fn access_specifier(input: &str) -> IResult<&str, InheritanceVisibility, VerboseError<&str>> {
     let (input, specifier) = map(
         terminated(
             alt((tag("public"), tag("private"), tag("protected"))),
@@ -238,36 +228,29 @@ fn access_specifier(input: &str) -> IResult<&str, InheritanceVisibility> {
 
     Ok((input, specifier))
 }
-
-fn skip_to_next_line(input: &str) -> IResult<&str, (), nom::error::Error<&str>> {
-    let (input, _) = take_until::<_, _, nom::error::Error<&str>>("\n")(input)?;
-    let input = input.strip_prefix('\n').unwrap_or(input);
-    Ok((input, ()))
-}
-
-pub fn parse_uproperty(input: &str) -> IResult<&str, &str> {
+pub fn parse_uproperty(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
     let (input, _) = (ws(tag("UPROPERTY")), nom::bytes::take_until("\n")).parse(input)?;
 
     Ok((input, ""))
 }
 
-pub fn parse_ufunction(input: &str) -> IResult<&str, &str> {
+pub fn parse_ufunction(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
     let (input, _) = (ws(tag("UFUNCTION")), nom::bytes::take_until("\n")).parse(input)?;
 
     Ok((input, ""))
 }
 
-pub fn parse_generate_body(input: &str) -> IResult<&str, &str> {
+pub fn parse_generate_body(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
     let (input, _) = ws(tag("GENERATE_BODY()")).parse(input)?;
 
     Ok((input, ""))
 }
-pub fn parse_ignore(input: &str) -> IResult<&str, &str> {
+pub fn parse_ignore(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
     alt((parse_generate_body, parse_uproperty, parse_ufunction)).parse(input)
 }
 #[cfg(test)]
 mod tests {
-    use crate::parser::cpp::class::{CppClass, CppParentClass, InheritanceVisibility};
+    use crate::parser::cpp::class::{parse_ufunction, CppClass, CppParentClass, InheritanceVisibility};
 
     use crate::parser::cpp::ctype::CType::Path;
     use crate::parser::cpp::method::CppFunction;
@@ -312,6 +295,21 @@ mod tests {
     }
 
     #[test]
+    fn test_empty_struct() {
+        let input = "struct Test {};";
+        let result = CppClass::parse(&input);
+        assert_eq!(
+            result,
+            Ok((
+                "",
+                CppClass {
+                    name: "Test",
+                    ..CppClass::default()
+                }
+            ))
+        );
+    }
+    #[test]
     fn test_ignore_template_specialisation() {
         let input = r#"template<>
         struct Test<int>
@@ -342,6 +340,36 @@ mod tests {
                 "",
                 CppClass {
                     name: "Test",
+                    ..CppClass::default()
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_parse_nested_struct() {
+        let input = r#"struct Test {
+            struct Inner {}
+        };"#;
+        let result = CppClass::parse(&input);
+
+        assert_eq!(
+            result,
+            Ok((
+                "",
+                CppClass {
+                    name: "Test",
+                    inner_classes: HashMap::from([
+                        (
+                            InheritanceVisibility::Private,
+                            vec![CppClass {
+                                name: "Inner",
+                                ..CppClass::default()
+                            }]
+                        ),
+                        (InheritanceVisibility::Protected, vec![]),
+                        (InheritanceVisibility::Public, vec![]),
+                    ]),
                     ..CppClass::default()
                 }
             ))

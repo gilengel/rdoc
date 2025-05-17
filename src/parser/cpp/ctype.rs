@@ -9,6 +9,7 @@ use nom::{
     multi::many0,
     sequence::{delimited, preceded},
 };
+use nom_language::error::VerboseError;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum CType<'a> {
@@ -31,11 +32,11 @@ fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-fn identifier(input: &str) -> IResult<&str, &str> {
+fn identifier(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
     take_while1(is_ident_char)(input)
 }
 
-fn path(input: &str) -> IResult<&str, CType> {
+fn path(input: &str) -> IResult<&str, CType, VerboseError<&str>> {
     map(separated_list0(tag("::"), identifier), |x| {
         match x.len() == 1 && x[0] == "auto" {
             true => CType::Auto,
@@ -45,7 +46,10 @@ fn path(input: &str) -> IResult<&str, CType> {
     .parse(input)
 }
 
-fn parse_generics<'a>(input: &'a str, ty: CType<'a>) -> IResult<&'a str, CType<'a>> {
+fn parse_generics<'a>(
+    input: &'a str,
+    ty: CType<'a>,
+) -> IResult<&'a str, CType<'a>, VerboseError<&'a str>> {
     opt(delimited(
         preceded(multispace0, char('<')),
         separated_list0(
@@ -64,7 +68,7 @@ fn parse_generics<'a>(input: &'a str, ty: CType<'a>) -> IResult<&'a str, CType<'
     })
 }
 
-fn parse_member_access<'a>(input: &'a str, mut ty: CType<'a>) -> IResult<&'a str, CType<'a>> {
+fn parse_member_access<'a>(input: &'a str, mut ty: CType<'a>) -> IResult<&'a str, CType<'a>, VerboseError<&'a str>> {
     let (input, members) = many0(preceded(tag("::"), identifier)).parse(input)?;
     for m in members {
         ty = CType::MemberAccess(Box::new(ty), m);
@@ -72,7 +76,10 @@ fn parse_member_access<'a>(input: &'a str, mut ty: CType<'a>) -> IResult<&'a str
     Ok((input, ty))
 }
 
-fn parse_function<'a>(input: &'a str, ty: CType<'a>) -> IResult<&'a str, CType<'a>> {
+fn parse_function<'a>(
+    input: &'a str,
+    ty: CType<'a>,
+) -> IResult<&'a str, CType<'a>, VerboseError<&'a str>> {
     opt(delimited(
         preceded(multispace0, char('(')),
         separated_list0(
@@ -91,7 +98,10 @@ fn parse_function<'a>(input: &'a str, ty: CType<'a>) -> IResult<&'a str, CType<'
     })
 }
 
-fn parse_ptrs_refs<'a>(mut ty: CType<'a>, input: &'a str) -> IResult<&'a str, CType<'a>> {
+fn parse_ptrs_refs<'a>(
+    mut ty: CType<'a>,
+    input: &'a str,
+) -> IResult<&'a str, CType<'a>, VerboseError<&'a str>> {
     let (input, suffixes) =
         many0(preceded(multispace0, alt((char('*'), char('&'))))).parse(input)?;
     for s in suffixes {
@@ -104,7 +114,7 @@ fn parse_ptrs_refs<'a>(mut ty: CType<'a>, input: &'a str) -> IResult<&'a str, CT
     Ok((input, ty))
 }
 
-fn parse_type_atom(input: &str) -> IResult<&str, CType> {
+fn parse_type_atom(input: &str) -> IResult<&str, CType, VerboseError<&str>> {
     // First, parse path
     let (input, ctype) = path(input)?;
 
@@ -123,7 +133,7 @@ fn parse_type_atom(input: &str) -> IResult<&str, CType> {
     Ok((input, ctype))
 }
 
-pub fn parse_cpp_type(input: &str) -> IResult<&str, CType> {
+pub fn parse_cpp_type(input: &str) -> IResult<&str, CType, VerboseError<&str>> {
     parse_type_atom(input)
 }
 

@@ -1,5 +1,4 @@
-﻿use crate::parser::cpp::{parse_str, ws};
-use nom::branch::alt;
+﻿use nom::branch::alt;
 use nom::bytes::complete::{escaped_transform, is_not, tag};
 use nom::character::complete::multispace0;
 use nom::character::complete::{char, i128};
@@ -9,7 +8,9 @@ use nom::number::complete::float;
 use nom::sequence::{delimited, preceded, terminated};
 use nom::{IResult, Parser};
 use std::str::FromStr;
+use nom_language::error::VerboseError;
 use crate::parser::cpp::ctype::{parse_cpp_type, CType};
+use crate::parser::{parse_str, ws};
 
 #[derive(Debug, Default, PartialEq)]
 pub struct CppVariableDecl<'a> {
@@ -48,7 +49,7 @@ impl FromStr for VariableSpecifier {
     }
 }
 
-fn variable_specifier(input: &str) -> IResult<&str, VariableSpecifier> {
+fn variable_specifier(input: &str) -> IResult<&str, VariableSpecifier, VerboseError<&str>> {
     // alt(...) returns a parser object
     // map_res(...) wraps it, returning another parser object
     // and *that* object is invoked with `.parse(input)`
@@ -64,7 +65,7 @@ fn variable_specifier(input: &str) -> IResult<&str, VariableSpecifier> {
     .parse(input) // <-- nom 8 style: call `.parse(...)` on the parser object
 }
 
-fn escaped_string(input: &str) -> IResult<&str, String> {
+fn escaped_string(input: &str) -> IResult<&str, String, VerboseError<&str>> {
     delimited(
         char('"'),
         escaped_transform(
@@ -84,7 +85,7 @@ fn escaped_string(input: &str) -> IResult<&str, String> {
     .parse(input)
 }
 
-fn type_value(input: &str) -> IResult<&str, Literal> {
+fn type_value(input: &str) -> IResult<&str, Literal, VerboseError<&str>> {
     // each branch is `map(parser, Literal::*)`
     alt((
         map(i128, Literal::Int),
@@ -94,7 +95,7 @@ fn type_value(input: &str) -> IResult<&str, Literal> {
     .parse(input) // now `Choice<…>` *does* implement Parser<_, Literal, _>
 }
 
-fn eq_sign(input: &str) -> IResult<&str, &str> {
+fn eq_sign(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
     map(
         (multispace0, char('='), multispace0),
         |_| "", // ignore the tuple, return empty string
@@ -102,7 +103,7 @@ fn eq_sign(input: &str) -> IResult<&str, &str> {
     .parse(input)
 }
 
-pub fn variable_decl(input: &str) -> IResult<&str, CppVariableDecl> {
+pub fn variable_decl(input: &str) -> IResult<&str, CppVariableDecl, VerboseError<&str>> {
     let (input, specifiers) = many0(variable_specifier).parse(input)?;
     let (input, ctype) = parse_cpp_type(input)?;
     let (input, _) = multispace0(input)?;

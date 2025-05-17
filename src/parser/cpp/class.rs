@@ -2,9 +2,10 @@
 use crate::parser::cpp::ctype::CType::Path;
 use crate::parser::cpp::ctype::{CType, parse_cpp_type};
 use crate::parser::cpp::member::{CppMember, parse_cpp_member};
-use crate::parser::cpp::method::{CppFunction, parse_cpp_method};
+use crate::parser::cpp::method::CppFunction;
 use crate::parser::cpp::template::parse_template;
-use crate::parser::cpp::{parse_ws_str, ws};
+use crate::parser::{parse_ws_str, ws};
+use crate::types::Parsable;
 use nom::branch::alt;
 use nom::bytes::complete::take_until;
 use nom::character::complete::{char, multispace0};
@@ -13,6 +14,7 @@ use nom::multi::separated_list1;
 use nom::sequence::{delimited, preceded, terminated};
 use nom::{IResult, Parser, bytes::complete::tag};
 use std::collections::HashMap;
+use nom_language::error::VerboseError;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct CppClass<'a> {
@@ -43,6 +45,125 @@ impl Default for CppClass<'_> {
     }
 }
 
+impl<'a> Parsable<'a> for CppClass<'a>
+{
+    fn parse(input: &'a str) -> IResult<&'a str, Self, VerboseError<&'a str>> {
+        let (input, _) = opt(parse_template).parse(input)?;
+        let (input, _) = alt((tag("class"), tag("struct"))).parse(input)?;
+        let (input, maybe_api) = parse_ws_str(input)?;
+        let (input, maybe_name_result) = opt(parse_ws_str).parse(input)?;
+
+        let (api, name) = match maybe_name_result {
+            Some(name) => (Some(maybe_api), name), // two identifiers → api + name
+            None => (None, maybe_api),             // only one → name, no api
+        };
+
+        // ignore template specialisation atm
+        let mut input = input;
+        if let Ok((i, _)) = opt(delimited(
+            char::<_, nom::error::Error<&str>>('<'),
+            take_until(">"),
+            char('>'),
+        ))
+        .parse(input)
+        {
+            input = i;
+        }
+        let (input, _) = multispace0(input)?;
+
+        // Return early for empty classes (e.g. forward declaration)
+        if let Ok((input, empty)) = opt(char::<_, nom::error::Error<&str>>(';')).parse(input) {
+            if empty.is_some() {
+                return Ok((
+                    input,
+                    CppClass {
+                        name,
+                        ..Default::default()
+                    },
+                ));
+            }
+        }
+
+        let (input, parents) = opt(parse_inheritance).parse(input)?;
+
+        let mut methods: HashMap<InheritanceVisibility, Vec<CppFunction>> = HashMap::from([
+            (InheritanceVisibility::Private, vec![]),
+            (InheritanceVisibility::Protected, vec![]),
+            (InheritanceVisibility::Public, vec![]),
+        ]);
+
+        let mut members: HashMap<InheritanceVisibility, Vec<CppMember>> = HashMap::from([
+            (InheritanceVisibility::Private, vec![]),
+            (InheritanceVisibility::Protected, vec![]),
+            (InheritanceVisibility::Public, vec![]),
+        ]);
+
+        let (input, _) = char('{')(input)?;
+        let (mut input, _) = multispace0(input)?; // skip everything between {} of a class for the moment
+
+        let mut current_access = InheritanceVisibility::Private;
+        loop {
+            let (i, _) = multispace0(input)?;
+            input = i;
+
+            if let Ok((next, _)) = parse_ignore(input) {
+                input = next;
+                continue;
+            }
+
+            if let Ok((next, _)) = char::<_, nom::error::Error<&str>>(';')(input) {
+                input = next;
+                continue;
+            }
+
+            if let Ok((next, _)) = char::<_, nom::error::Error<&str>>('}')(input) {
+                let (rest, _) = opt(char(';')).parse(next)?;
+                return Ok((
+                    rest,
+                    CppClass {
+                        name,
+                        api,
+                        parents: parents.unwrap_or(vec![]),
+                        methods,
+                        members,
+                    },
+                ));
+            }
+
+            if let Ok((next_input, access)) = access_specifier(input) {
+                current_access = access;
+                input = next_input;
+                continue;
+            }
+
+            if let Ok((next_input, method)) = CppFunction::parse(input) {
+                let (next_input, _) =
+                    opt(preceded(ws(char(':')), take_until("{").or(take_until(";"))))
+                        .parse(next_input)?;
+
+                methods.get_mut(&current_access).unwrap().push(method);
+                input = next_input;
+                continue;
+            }
+
+            if let Ok((next_input, member)) = parse_cpp_member(input) {
+                members.get_mut(&current_access).unwrap().push(member);
+                input = next_input;
+                continue;
+            }
+
+            // Skip unknown or unsupported lines (e.g., whitespace or preprocessor)
+            if let Ok((next_input, _)) = skip_to_next_line(input) {
+                input = next_input;
+            } else {
+                break;
+            }
+        }
+
+        Err(nom::Err::Error(nom_language::error::VerboseError { errors: vec![] }))
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct CppParentClass<'a> {
     name: CType<'a>,
@@ -70,7 +191,7 @@ impl From<&str> for InheritanceVisibility {
     }
 }
 
-fn parse_inheritance_visibility(input: &str) -> IResult<&str, InheritanceVisibility> {
+fn parse_inheritance_visibility(input: &str) -> IResult<&str, InheritanceVisibility, VerboseError<&str>> {
     let (input, _) = multispace0(input)?;
 
     // Try to match one of the known keywords
@@ -90,13 +211,13 @@ fn parse_inheritance_visibility(input: &str) -> IResult<&str, InheritanceVisibil
     Ok((input, visibility))
 }
 
-fn parse_single_inheritance(input: &str) -> IResult<&str, CppParentClass> {
+fn parse_single_inheritance(input: &str) -> IResult<&str, CppParentClass, VerboseError<&str>> {
     let (input, visibility) = parse_inheritance_visibility(input)?;
     let (input, name) = ws(parse_cpp_type).parse(input)?;
 
     Ok((input, CppParentClass { name, visibility }))
 }
-fn parse_inheritance(input: &str) -> IResult<&str, Vec<CppParentClass>> {
+fn parse_inheritance(input: &str) -> IResult<&str, Vec<CppParentClass>, VerboseError<&str>> {
     let (input, _) = multispace0(input)?;
     let (input, _) = char(':')(input)?;
     let (input, parent_classes) =
@@ -144,132 +265,13 @@ pub fn parse_generate_body(input: &str) -> IResult<&str, &str> {
 pub fn parse_ignore(input: &str) -> IResult<&str, &str> {
     alt((parse_generate_body, parse_uproperty, parse_ufunction)).parse(input)
 }
-pub fn parse_cpp_class(input: &str) -> IResult<&str, CppClass> {
-    let (input, _) = opt(parse_template).parse(input)?;
-    let (input, _) = alt((tag("class"), tag("struct"))).parse(input)?;
-    let (input, maybe_api) = parse_ws_str(input)?;
-    let (input, maybe_name_result) = opt(parse_ws_str).parse(input)?;
-
-    let (api, name) = match maybe_name_result {
-        Some(name) => (Some(maybe_api), name), // two identifiers → api + name
-        None => (None, maybe_api),             // only one → name, no api
-    };
-
-    // ignore template specialisation atm
-    let mut input = input;
-    if let Ok((i, _)) = opt(delimited(
-        char::<_, nom::error::Error<&str>>('<'),
-        take_until(">"),
-        char('>'),
-    ))
-    .parse(input)
-    {
-        input = i;
-    }
-    let (input, _) = multispace0(input)?;
-
-    // Return early for empty classes (e.g. forward declaration)
-    if let Ok((input, empty)) = opt(char::<_, nom::error::Error<&str>>(';')).parse(input) {
-        if empty.is_some() {
-            return Ok((
-                input,
-                CppClass {
-                    name,
-                    ..Default::default()
-                },
-            ));
-        }
-    }
-
-    let (input, parents) = opt(parse_inheritance).parse(input)?;
-
-    let mut methods: HashMap<InheritanceVisibility, Vec<CppFunction>> = HashMap::from([
-        (InheritanceVisibility::Private, vec![]),
-        (InheritanceVisibility::Protected, vec![]),
-        (InheritanceVisibility::Public, vec![]),
-    ]);
-
-    let mut members: HashMap<InheritanceVisibility, Vec<CppMember>> = HashMap::from([
-        (InheritanceVisibility::Private, vec![]),
-        (InheritanceVisibility::Protected, vec![]),
-        (InheritanceVisibility::Public, vec![]),
-    ]);
-
-    let (input, _) = char('{')(input)?;
-    let (mut input, _) = multispace0(input)?; // skip everything between {} of a class for the moment
-
-    let mut current_access = InheritanceVisibility::Private;
-    loop {
-        let (i, _) = multispace0(input)?;
-        input = i;
-
-        if let Ok((next, _)) = parse_ignore(input) {
-            input = next;
-            continue;
-        }
-
-        if let Ok((next, _)) = char::<_, nom::error::Error<&str>>(';')(input) {
-            input = next;
-            continue;
-        }
-
-        if let Ok((next, _)) = char::<_, nom::error::Error<&str>>('}')(input) {
-            let (rest, _) = opt(char(';')).parse(next)?;
-            return Ok((
-                rest,
-                CppClass {
-                    name,
-                    api,
-                    parents: parents.unwrap_or(vec![]),
-                    methods,
-                    members,
-                },
-            ));
-        }
-
-        if let Ok((next_input, access)) = access_specifier(input) {
-            current_access = access;
-            input = next_input;
-            continue;
-        }
-
-        if let Ok((next_input, method)) = parse_cpp_method(input) {
-            let (next_input, _) = opt(preceded(ws(char(':')), take_until("{").or(take_until(";"))))
-                .parse(next_input)?;
-
-            methods.get_mut(&current_access).unwrap().push(method);
-            input = next_input;
-            continue;
-        }
-
-        if let Ok((next_input, member)) = parse_cpp_member(input) {
-            members.get_mut(&current_access).unwrap().push(member);
-            input = next_input;
-            continue;
-        }
-
-        // Skip unknown or unsupported lines (e.g., whitespace or preprocessor)
-        if let Ok((next_input, _)) = skip_to_next_line(input) {
-            input = next_input;
-        } else {
-            break;
-        }
-    }
-
-    Err(nom::Err::Error(nom::error::Error::new(
-        input,
-        nom::error::ErrorKind::Tag,
-    )))
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::parser::cpp::class::{
-        CppClass, CppParentClass, InheritanceVisibility, parse_cpp_class,
-    };
+    use crate::parser::cpp::class::{CppClass, CppParentClass, InheritanceVisibility};
 
     use crate::parser::cpp::ctype::CType::Path;
     use crate::parser::cpp::method::CppFunction;
+    use crate::types::Parsable;
     use rand::Rng;
     use std::collections::HashMap;
 
@@ -289,8 +291,10 @@ mod tests {
     fn test_parse_empty_cpp_with_inheritance_class() {
         for visibility in ["private", "protected", "public", ""] {
             let input = format!("class test : {visibility} a {{}};");
+            let result = CppClass::parse(&input);
+
             assert_eq!(
-                parse_cpp_class(&input[..]),
+                result,
                 Ok((
                     "",
                     CppClass {
@@ -313,8 +317,10 @@ mod tests {
         struct Test<int>
         {
         };"#;
+        let result = CppClass::parse(&input);
+
         assert_eq!(
-            parse_cpp_class(input),
+            result,
             Ok((
                 "",
                 CppClass {
@@ -328,8 +334,10 @@ mod tests {
     #[test]
     fn test_parse_empty_struct() {
         let input = "struct Test {};";
+        let result = CppClass::parse(&input);
+
         assert_eq!(
-            parse_cpp_class(&input[..]),
+            result,
             Ok((
                 "",
                 CppClass {
@@ -346,8 +354,10 @@ mod tests {
         {
             Test(){};
         };"#;
+        let result = CppClass::parse(&input);
+
         assert_eq!(
-            parse_cpp_class(&input[..]),
+            result,
             Ok((
                 "",
                 CppClass {
@@ -372,8 +382,10 @@ mod tests {
     #[test]
     fn test_parse_empty_templated_struct() {
         let input = "template<typename T>\nstruct Test {};";
+        let result = CppClass::parse(&input);
+
         assert_eq!(
-            parse_cpp_class(&input[..]),
+            result,
             Ok((
                 "",
                 CppClass {
@@ -387,8 +399,10 @@ mod tests {
     #[test]
     fn test_parse_empty_cpp_with_multiple_inheritance_classes() {
         let input = "class test : public a, private b {};";
+        let result = CppClass::parse(&input);
+
         assert_eq!(
-            parse_cpp_class(&input[..]),
+            result,
             Ok((
                 "",
                 CppClass {
@@ -413,8 +427,10 @@ mod tests {
     #[test]
     fn test_parse_empty_cpp_with_namespaced_inheritance_class() {
         let input = "class test : public namespace::a {};";
+        let result = CppClass::parse(&input);
+
         assert_eq!(
-            parse_cpp_class(&input[..]),
+            result,
             Ok((
                 "",
                 CppClass {
@@ -436,8 +452,10 @@ mod tests {
             public:
                 test();
         };"#;
+        let result = CppClass::parse(&input);
+
         assert_eq!(
-            parse_cpp_class(&input[..]),
+            result,
             Ok((
                 "",
                 CppClass {
@@ -472,8 +490,10 @@ mod tests {
                     }
                 }
         };"#;
+        let result = CppClass::parse(&input);
+
         assert_eq!(
-            parse_cpp_class(&input[..]),
+            result,
             Ok((
                 "",
                 CppClass {
@@ -498,8 +518,10 @@ mod tests {
     #[test]
     fn test_parse_empty_cpp_with_api() {
         let input = format!("class MY_API test {{}};");
+        let result = CppClass::parse(&input);
+
         assert_eq!(
-            parse_cpp_class(&input[..]),
+            result,
             Ok((
                 "",
                 CppClass {
@@ -520,8 +542,10 @@ mod tests {
                 random_whitespace_string(),
                 random_newline_string()
             );
+            let result = CppClass::parse(&input);
+
             assert_eq!(
-                parse_cpp_class(&input[..]),
+                result,
                 Ok((
                     "",
                     CppClass {
@@ -538,8 +562,10 @@ mod tests {
         let input = r#"class test {
                 void hello();
             };"#;
+        let result = CppClass::parse(&input);
+
         assert_eq!(
-            parse_cpp_class(&input[..]),
+            result,
             Ok((
                 "",
                 CppClass {
@@ -564,8 +590,10 @@ mod tests {
     #[test]
     fn test_parse_class_with_multiple_methods() {
         let input = "class test {void hello();\nvoid goodbye();};";
+        let result = CppClass::parse(&input);
+
         assert_eq!(
-            parse_cpp_class(&input[..]),
+            result,
             Ok((
                 "",
                 CppClass {
@@ -599,8 +627,10 @@ mod tests {
 #[test]
 fn test_parse_class_with_multiple_mixed_methods() {
     let input = format!("class test {{void hello();\nauto goodbye() -> int;}}");
+    let result = CppClass::parse(&input);
+
     assert_eq!(
-        parse_cpp_class(&input[..]),
+        result,
         Ok((
             "",
             CppClass {
@@ -651,60 +681,65 @@ fn test_simple_class() {
             int count{0};
     };"#;
 
-    let result = parse_cpp_class(&input[..]).unwrap().1;
-    let expected = CppClass {
-        name: "TestClass",
-        methods: HashMap::from([
-            (
-                InheritanceVisibility::Private,
-                vec![CppFunction {
-                    name: "helloPrivate",
-                    comment: Some(CppComment {
-                        comment: "says only hello to itself".to_string(),
-                    }),
-                    ..Default::default()
-                }],
-            ),
-            (
-                InheritanceVisibility::Protected,
-                vec![CppFunction {
-                    name: "helloProtected",
-                    comment: Some(CppComment {
-                        comment: "says only hello to its relatives".to_string(),
-                    }),
-                    ..Default::default()
-                }],
-            ),
-            (
-                InheritanceVisibility::Public,
-                vec![CppFunction {
-                    name: "hello",
-                    comment: Some(CppComment {
-                        comment: "says hello to everybody that listens".to_string(),
-                    }),
-                    ..Default::default()
-                }],
-            ),
-        ]),
-        members: HashMap::from([
-            (
-                InheritanceVisibility::Private,
-                vec![CppMember {
-                    name: "count",
-                    ctype: Path(vec!["int"]),
-                    default_value: Some(Path(vec!["0"])),
-                    comment: Some(CppComment {
-                        comment: "internal counter on how many times others were greeted"
-                            .to_string(),
-                    }),
-                    ..Default::default()
-                }],
-            ),
-            (InheritanceVisibility::Protected, vec![]),
-            (InheritanceVisibility::Public, vec![]),
-        ]),
-        ..CppClass::default()
-    };
+    let result = CppClass::parse(input);
 
-    assert_eq!(result, expected,);
+    assert_eq!(
+        result,
+        Ok((
+            "",
+            CppClass {
+                name: "TestClass",
+                methods: HashMap::from([
+                    (
+                        InheritanceVisibility::Private,
+                        vec![CppFunction {
+                            name: "helloPrivate",
+                            comment: Some(CppComment {
+                                comment: "says only hello to itself".to_string(),
+                            }),
+                            ..Default::default()
+                        }],
+                    ),
+                    (
+                        InheritanceVisibility::Protected,
+                        vec![CppFunction {
+                            name: "helloProtected",
+                            comment: Some(CppComment {
+                                comment: "says only hello to its relatives".to_string(),
+                            }),
+                            ..Default::default()
+                        }],
+                    ),
+                    (
+                        InheritanceVisibility::Public,
+                        vec![CppFunction {
+                            name: "hello",
+                            comment: Some(CppComment {
+                                comment: "says hello to everybody that listens".to_string(),
+                            }),
+                            ..Default::default()
+                        }],
+                    ),
+                ]),
+                members: HashMap::from([
+                    (
+                        InheritanceVisibility::Private,
+                        vec![CppMember {
+                            name: "count",
+                            ctype: Path(vec!["int"]),
+                            default_value: Some(Path(vec!["0"])),
+                            comment: Some(CppComment {
+                                comment: "internal counter on how many times others were greeted"
+                                    .to_string(),
+                            }),
+                            ..Default::default()
+                        }],
+                    ),
+                    (InheritanceVisibility::Protected, vec![]),
+                    (InheritanceVisibility::Public, vec![]),
+                ]),
+                ..CppClass::default()
+            }
+        ))
+    );
 }

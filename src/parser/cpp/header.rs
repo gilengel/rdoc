@@ -1,7 +1,5 @@
-﻿use crate::parser::cpp::class::{CppClass, parse_cpp_class};
-use crate::parser::cpp::comment::parse_cpp_comment;
-use crate::parser::cpp::method::{CppFunction, parse_cpp_method};
-use crate::parser::cpp::ws;
+﻿use crate::parser::cpp::class::{CppClass};
+use crate::parser::cpp::method::{CppFunction};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::take_until;
@@ -9,6 +7,9 @@ use nom::character::complete::{char, multispace0};
 use nom::combinator::{eof, opt};
 use nom::sequence::{delimited, preceded, terminated};
 use nom::{IResult, Parser};
+use crate::parser::cpp::comment::CppComment;
+use crate::parser::ws;
+use crate::types::Parsable;
 
 #[derive(Debug)]
 pub struct CppHeader<'a> {
@@ -37,6 +38,8 @@ pub fn parse_uclass(input: &str) -> IResult<&str, &str> {
 }
 
 pub fn parse_cpp_header(input: &str) -> IResult<&str, CppHeader> {
+    let (input, _) = opt(tag("\u{feff}")).parse(input)?;
+
     let mut input = input;
 
     let mut classes = Vec::new();
@@ -60,19 +63,19 @@ pub fn parse_cpp_header(input: &str) -> IResult<&str, CppHeader> {
             continue;
         }
 
-        if let Ok((i, _)) = preceded(multispace0, parse_cpp_comment).parse(input) {
+        if let Ok((i, _)) = preceded(multispace0, |i| <CppComment as Parsable>::parse(i)).parse(input) {
             input = i;
             continue;
         }
 
-        if let Ok((i, class)) = preceded(multispace0, parse_cpp_class).parse(input) {
+        if let Ok((i, class)) = preceded(multispace0, CppClass::parse).parse(input) {
             classes.push(class);
 
             input = i;
             continue;
         }
 
-        if let Ok((i, function)) = terminated(parse_cpp_method, opt(char(';'))).parse(input) {
+        if let Ok((i, function)) = terminated(CppFunction::parse, opt(char(';'))).parse(input) {
             functions.push(function);
 
             input = i;
@@ -109,6 +112,8 @@ mod tests {
         let input = r#"#pragma once
             #include "CoreMinimal.h"
             #include "Modules/ModuleManager.h"
+
+            const static int helloCount = 0;
 
             struct Empty{};
 

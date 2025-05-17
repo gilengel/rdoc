@@ -1,10 +1,11 @@
-﻿use nom::bytes::complete::tag;
-use nom::character::complete::{char, multispace0};
-use nom::IResult;
-use crate::parser::cpp::class::{parse_cpp_class, CppClass};
-use crate::parser::cpp::comment::parse_cpp_comment;
+﻿use crate::parser::cpp::class::CppClass;
 use crate::parser::cpp::method::CppFunction;
-use crate::parser::cpp::parse_ws_str;
+use nom::IResult;
+use nom::bytes::complete::tag;
+use nom::character::complete::{char, multispace0};
+use crate::parser::cpp::comment::CppComment;
+use crate::parser::parse_ws_str;
+use crate::types::Parsable;
 
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct CppNamespace<'a> {
@@ -37,12 +38,13 @@ fn parse_inner_namespace(input: &str) -> IResult<&str, CppNamespace> {
             continue;
         }
 
-        if let Ok((i, _)) = parse_cpp_comment(input) {
+
+        if let Ok((i, _)) = <CppComment as Parsable>::parse(input) {
             input = i;
             continue;
         }
 
-        if let Ok((i, class)) = parse_cpp_class(input) {
+        if let Ok((i, class)) = <CppClass as Parsable>::parse(input) {
             namespace.classes.push(class);
 
             input = i;
@@ -53,7 +55,10 @@ fn parse_inner_namespace(input: &str) -> IResult<&str, CppNamespace> {
             return Ok((i, namespace));
         }
 
-        return Err(nom::Err::Error(nom::error::make_error(input, nom::error::ErrorKind::Tag)));
+        return Err(nom::Err::Error(nom::error::make_error(
+            input,
+            nom::error::ErrorKind::Tag,
+        )));
     }
 }
 
@@ -64,15 +69,18 @@ pub fn parse_cpp_namespace(input: &str) -> IResult<&str, CppNamespace> {
 #[cfg(test)]
 mod tests {
     use crate::parser::cpp::class::CppClass;
-    use crate::parser::cpp::namespace::{parse_cpp_namespace, CppNamespace};
+    use crate::parser::cpp::namespace::{CppNamespace, parse_cpp_namespace};
 
     #[test]
     fn empty_namespace() {
         let input = "namespace test {}";
-        let expected = Ok(("", CppNamespace {
-            name: "test",
-            ..Default::default()
-        }));
+        let expected = Ok((
+            "",
+            CppNamespace {
+                name: "test",
+                ..Default::default()
+            },
+        ));
 
         let result = parse_cpp_namespace(input);
         assert_eq!(result, expected);
@@ -81,14 +89,17 @@ mod tests {
     #[test]
     fn empty_nested_namespace() {
         let input = "namespace OuterNamespace { namespace InnerNamespace {} }";
-        let expected = Ok(("", CppNamespace {
-            name: "OuterNamespace",
-            namespaces: vec![CppNamespace {
-                name: "InnerNamespace",
+        let expected = Ok((
+            "",
+            CppNamespace {
+                name: "OuterNamespace",
+                namespaces: vec![CppNamespace {
+                    name: "InnerNamespace",
+                    ..Default::default()
+                }],
                 ..Default::default()
-            }],
-            ..Default::default()
-        }));
+            },
+        ));
 
         let result = parse_cpp_namespace(input);
         assert_eq!(result, expected);
@@ -99,10 +110,13 @@ mod tests {
             // some comment
         }"#;
 
-        let expected = Ok(("", CppNamespace {
-            name: "test",
-            ..Default::default()
-        }));
+        let expected = Ok((
+            "",
+            CppNamespace {
+                name: "test",
+                ..Default::default()
+            },
+        ));
 
         let result = parse_cpp_namespace(input);
         assert_eq!(result, expected);
@@ -114,14 +128,17 @@ mod tests {
             class TestClass {};
         }"#;
 
-        let expected = Ok(("", CppNamespace {
-            name: "test",
-            classes: vec![CppClass {
-                name: "TestClass",
+        let expected = Ok((
+            "",
+            CppNamespace {
+                name: "test",
+                classes: vec![CppClass {
+                    name: "TestClass",
+                    ..Default::default()
+                }],
                 ..Default::default()
-            }],
-            ..Default::default()
-        }));
+            },
+        ));
 
         let result = parse_cpp_namespace(input);
         assert_eq!(result, expected);
@@ -133,14 +150,17 @@ mod tests {
             class TestClass;
         }"#;
 
-        let expected = Ok(("", CppNamespace {
-            name: "test",
-            classes: vec![CppClass {
-                name: "TestClass",
+        let expected = Ok((
+            "",
+            CppNamespace {
+                name: "test",
+                classes: vec![CppClass {
+                    name: "TestClass",
+                    ..Default::default()
+                }],
                 ..Default::default()
-            }],
-            ..Default::default()
-        }));
+            },
+        ));
 
         let result = parse_cpp_namespace(input);
         assert_eq!(result, expected);

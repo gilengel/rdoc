@@ -1,6 +1,5 @@
-﻿use crate::parser::cpp::comment::{CppComment, parse_cpp_comment};
+﻿use crate::parser::cpp::comment::CppComment;
 use crate::parser::cpp::ctype::{CType, parse_cpp_type};
-use crate::parser::cpp::parse_ws_str;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::{char, multispace0};
@@ -8,6 +7,9 @@ use nom::combinator::{map, opt};
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded};
 use nom::{IResult, Parser};
+use nom_language::error::VerboseError;
+use crate::parser::parse_ws_str;
+use crate::types::Parsable;
 
 #[derive(Debug, Eq, PartialEq, Clone, Default)]
 pub struct CppMember<'a> {
@@ -46,7 +48,7 @@ impl From<&str> for CppMemberModifier {
     }
 }
 
-fn parse_modifier(input: &str) -> IResult<&str, &str> {
+fn parse_modifier(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
     preceded(
         multispace0,
         alt((tag("static"), tag("const"), tag("inline"))),
@@ -54,12 +56,12 @@ fn parse_modifier(input: &str) -> IResult<&str, &str> {
     .parse(input)
 }
 
-fn parse_modifiers(input: &str) -> IResult<&str, Vec<CppMemberModifier>> {
+fn parse_modifiers(input: &str) -> IResult<&str, Vec<CppMemberModifier>, VerboseError<&str>> {
     many0(map(parse_modifier, |x| CppMemberModifier::from(x))).parse(input)
 }
 
-pub fn parse_cpp_member(input: &str) -> IResult<&str, CppMember> {
-    let (input, comment) = opt(parse_cpp_comment).parse(input)?;
+pub fn parse_cpp_member(input: &str) -> IResult<&str, CppMember, VerboseError<&str>> {
+    let (input, comment) = opt(|i| <CppComment as Parsable>::parse(i)).parse(input)?;
     let (input, _) = multispace0.parse(input)?;
     let (input, modifiers) = parse_modifiers(input)?;
     let (input, _) = multispace0.parse(input)?;

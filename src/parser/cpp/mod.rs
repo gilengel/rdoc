@@ -8,4 +8,5 @@ pub mod namespace;
 mod template;
 mod variable;
 pub mod cenum;
+mod alias;
 

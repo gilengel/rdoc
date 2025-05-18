@@ -1,8 +1,9 @@
 ﻿use crate::parser::cpp::ctype::{CType, parse_cpp_type};
-use crate::parser::cpp::method::{Method, parse_method};
 use crate::parser::cpp::template::parse_template;
+use crate::parser::generic::annotation::Annotation;
 use crate::parser::generic::comment::parse_comment;
 use crate::parser::generic::member::{Member, parse_member};
+use crate::parser::generic::method::{Method, parse_method};
 use crate::parser::{parse_ws_str, ws};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_until};
@@ -13,6 +14,7 @@ use nom::sequence::{delimited, preceded, terminated};
 use nom::{IResult, Parser};
 use nom_language::error::VerboseError;
 use std::collections::HashMap;
+use std::marker::PhantomData;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct CppParentClass<'a> {
@@ -41,10 +43,52 @@ impl From<&str> for InheritanceVisibility {
     }
 }
 
-pub trait Class<'a, MemberType, MethodType, CommentType>
-where
-    MethodType: Method<'a, CommentType>,
-    MemberType: Member<'a, CommentType>,
+#[derive(Debug, Eq, PartialEq, Clone, Default)]
+pub struct GClass<
+    'a,
+    ClassAnnotationType,
+    MethodType,
+    MethodAnnotationType,
+    MemberType,
+    MemberAnnotationType,
+    CommentType,
+> where
+    ClassAnnotationType: Annotation<'a> + 'a,
+    MethodAnnotationType: Annotation<'a> + 'a,
+    MemberAnnotationType: Annotation<'a> + 'a,
+    MethodType: Method<'a, MethodAnnotationType, CommentType> + 'a,
+    MemberType: Member<'a, MemberAnnotationType, CommentType> + 'a,
+    CommentType: From<String>,
+{
+    pub name: &'a str,
+    pub parents: Vec<CppParentClass<'a>>,
+    pub methods: HashMap<InheritanceVisibility, Vec<MethodType>>,
+    pub members: HashMap<InheritanceVisibility, Vec<MemberType>>,
+    pub inner_classes: HashMap<InheritanceVisibility, Vec<Self>>,
+    pub annotations: Option<Vec<ClassAnnotationType>>,
+
+    pub _marker: PhantomData<(
+        CommentType,
+        ClassAnnotationType,
+        MethodAnnotationType,
+        MemberAnnotationType,
+    )>,
+}
+
+pub trait Class<
+    'a,
+    ClassAnnotationType,
+    MethodType,
+    MethodAnnotationType,
+    MemberType,
+    MemberAnnotationType,
+    CommentType,
+> where
+    ClassAnnotationType: Annotation<'a> + 'a,
+    MethodAnnotationType: Annotation<'a> + 'a,
+    MemberAnnotationType: Annotation<'a> + 'a,
+    MethodType: Method<'a, MethodAnnotationType, CommentType> + 'a,
+    MemberType: Member<'a, MemberAnnotationType, CommentType> + 'a,
     CommentType: From<String>,
 {
     fn class(
@@ -54,6 +98,7 @@ where
         methods: HashMap<InheritanceVisibility, Vec<MethodType>>,
         members: HashMap<InheritanceVisibility, Vec<MemberType>>,
         inner_classes: HashMap<InheritanceVisibility, Vec<Self>>,
+        annotations: Option<Vec<ClassAnnotationType>>,
     ) -> Self
     where
         Self: 'a + Sized;
@@ -65,14 +110,34 @@ pub struct ParentClass<'a> {
     pub visibility: InheritanceVisibility,
 }
 
-pub fn parse_class<'a, ClassType, MemberType, MethodType, CommentType>(
+pub fn parse_class<
+    'a,
+    ClassType,
+    ClassAnnotationType,
+    MethodType,
+    MethodAnnotationType,
+    MemberType,
+    MemberAnnotationType,
+    CommentType,
+>(
     input: &'a str,
 ) -> IResult<&'a str, ClassType, VerboseError<&'a str>>
 where
-    MethodType: Method<'a, CommentType> + 'a,
-    MemberType: Member<'a, CommentType> + 'a,
+    ClassAnnotationType: Annotation<'a> + 'a,
+    MethodAnnotationType: Annotation<'a> + 'a,
+    MemberAnnotationType: Annotation<'a> + 'a,
+    MethodType: Method<'a, MethodAnnotationType, CommentType> + 'a,
+    MemberType: Member<'a, MemberAnnotationType, CommentType> + 'a,
     CommentType: From<String> + 'a,
-    ClassType: Class<'a, MemberType, MethodType, CommentType> + 'a,
+    ClassType: Class<
+            'a,
+            ClassAnnotationType,
+            MethodType,
+            MethodAnnotationType,
+            MemberType,
+            MemberAnnotationType,
+            CommentType,
+        > + 'a,
 {
     let (input, _) = opt(parse_template).parse(input)?;
     let (input, _) = parse_class_identifier(input)?;
@@ -103,6 +168,7 @@ where
                 HashMap::new(),
                 HashMap::new(),
                 HashMap::new(),
+                None,
             ),
         ));
     }
@@ -118,7 +184,15 @@ where
     let (input, _) = char('{')(input)?;
     let mut current_access = InheritanceVisibility::Private;
     let (input, (items, _)) = many_till(
-        parse_class_item::<ClassType, MethodType, MemberType, CommentType>,
+        parse_class_item::<
+            ClassType,
+            ClassAnnotationType,
+            MethodType,
+            MethodAnnotationType,
+            MemberType,
+            MemberAnnotationType,
+            CommentType,
+        >,
         preceded(multispace0, char('}')),
     )
     .parse(input)?;
@@ -146,17 +220,37 @@ where
             methods,
             members,
             inner_classes,
+            None,
         ),
     ))
 }
 
 #[derive(Debug, PartialEq, Clone)]
-enum ClassItem<'a, ClassType, MethodType, MemberType, CommentType>
-where
-    MethodType: Method<'a, CommentType>,
-    MemberType: Member<'a, CommentType>,
+enum ClassItem<
+    'a,
+    ClassType,
+    ClassAnnotationType,
+    MethodType,
+    MethodAnnotationType,
+    MemberType,
+    MemberAnnotationType,
+    CommentType,
+> where
+    ClassAnnotationType: Annotation<'a> + 'a,
+    MethodAnnotationType: Annotation<'a> + 'a,
+    MemberAnnotationType: Annotation<'a> + 'a,
+    MethodType: Method<'a, MethodAnnotationType, CommentType> + 'a,
+    MemberType: Member<'a, MemberAnnotationType, CommentType> + 'a,
     CommentType: From<String>,
-    ClassType: Class<'a, MemberType, MethodType, CommentType>,
+    ClassType: Class<
+            'a,
+            ClassAnnotationType,
+            MethodType,
+            MethodAnnotationType,
+            MemberType,
+            MemberAnnotationType,
+            CommentType,
+        >,
     Self: 'a + Sized,
 {
     Ignore,
@@ -168,7 +262,13 @@ where
     End, // matched on `}` (+ optional `;`)
 
     #[doc(hidden)]
-    __Phantom(std::marker::PhantomData<&'a ()>),
+    __Phantom(
+        std::marker::PhantomData<(
+            &'a ClassAnnotationType,
+            &'a MethodAnnotationType,
+            &'a MemberAnnotationType,
+        )>,
+    ),
 }
 
 fn parse_class_identifier(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
@@ -211,18 +311,47 @@ fn parse_inheritance(input: &str) -> IResult<&str, Vec<CppParentClass>, VerboseE
     Ok((input, parent_classes))
 }
 
-fn parse_class_item<'a, ClassType, MethodType, MemberType, CommentType>(
+fn parse_class_item<
+    'a,
+    ClassType,
+    ClassAnnotationType,
+    MethodType,
+    MethodAnnotationType,
+    MemberType,
+    MemberAnnotationType,
+    CommentType,
+>(
     input: &'a str,
 ) -> IResult<
     &'a str,
-    ClassItem<'a, ClassType, MethodType, MemberType, CommentType>,
+    ClassItem<
+        'a,
+        ClassType,
+        ClassAnnotationType,
+        MethodType,
+        MethodAnnotationType,
+        MemberType,
+        MemberAnnotationType,
+        CommentType,
+    >,
     VerboseError<&'a str>,
 >
 where
-    MethodType: Method<'a, CommentType>,
-    MemberType: Member<'a, CommentType>,
+    ClassAnnotationType: Annotation<'a> + 'a,
+    MethodAnnotationType: Annotation<'a> + 'a,
+    MemberAnnotationType: Annotation<'a> + 'a,
+    MethodType: Method<'a, MethodAnnotationType, CommentType> + 'a,
+    MemberType: Member<'a, MemberAnnotationType, CommentType> + 'a,
     CommentType: From<String>,
-    ClassType: Class<'a, MemberType, MethodType, CommentType>,
+    ClassType: Class<
+            'a,
+            ClassAnnotationType,
+            MethodType,
+            MethodAnnotationType,
+            MemberType,
+            MemberAnnotationType,
+            CommentType,
+        >,
 {
     let (input, item) = preceded(
         multispace0,

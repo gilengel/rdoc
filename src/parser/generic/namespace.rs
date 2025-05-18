@@ -1,22 +1,42 @@
-﻿use crate::parser::cpp::method::{Method, parse_method};
+﻿use crate::parser::generic::annotation::Annotation;
 use crate::parser::generic::class::{Class, parse_class};
 use crate::parser::generic::comment::parse_comment;
 use crate::parser::generic::member::{Member, parse_member};
+use crate::parser::generic::method::{Method, parse_method};
 use crate::parser::{parse_str, ws};
-use nom::{IResult, Parser};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::{char, multispace0};
 use nom::combinator::{map, opt};
 use nom::multi::many_till;
 use nom::sequence::preceded;
+use nom::{IResult, Parser};
 use nom_language::error::VerboseError;
 
-pub trait Namespace<'a, ClassType, VariableType, MethodType, CommentType>
-where
-    ClassType: Class<'a, VariableType, MethodType, CommentType>,
-    MethodType: Method<'a, CommentType>,
-    VariableType: Member<'a, CommentType>,
+pub trait Namespace<
+    'a,
+    ClassType,
+    ClassAnnotationType,
+    VariableType,
+    VariableAnnotationType,
+    MethodType,
+    MethodAnnotationType,
+    CommentType,
+> where
+    ClassType: Class<
+            'a,
+            ClassAnnotationType,
+            MethodType,
+            MethodAnnotationType,
+            VariableType,
+            VariableAnnotationType,
+            CommentType,
+        >,
+    ClassAnnotationType: Annotation<'a> + 'a,
+    MethodAnnotationType: Annotation<'a> + 'a,
+    VariableAnnotationType: Annotation<'a> + 'a,
+    MethodType: Method<'a, MethodAnnotationType, CommentType> + 'a,
+    VariableType: Member<'a, VariableAnnotationType, CommentType> + 'a,
     CommentType: From<String>,
 {
     fn namespace(
@@ -31,14 +51,44 @@ where
         Self: 'a + Sized;
 }
 
-pub fn parse_namespace<'a, NamespaceType, ClassType, VariableType, MethodType, CommentType>(
+pub fn parse_namespace<
+    'a,
+    NamespaceType,
+    ClassType,
+    ClassAnnotationType,
+    VariableType,
+    VariableAnnotationType,
+    MethodType,
+    MethodAnnotationType,
+    CommentType,
+>(
     input: &'a str,
 ) -> IResult<&'a str, NamespaceType, VerboseError<&'a str>>
 where
-    NamespaceType: Namespace<'a, ClassType, VariableType, MethodType, CommentType> + 'a,
-    ClassType: Class<'a, VariableType, MethodType, CommentType> + 'a,
-    MethodType: Method<'a, CommentType> + 'a,
-    VariableType: Member<'a, CommentType> + 'a,
+    NamespaceType: Namespace<
+            'a,
+            ClassType,
+            ClassAnnotationType,
+            VariableType,
+            VariableAnnotationType,
+            MethodType,
+            MethodAnnotationType,
+            CommentType,
+        > + 'a,
+    ClassType: Class<
+            'a,
+            ClassAnnotationType,
+            MethodType,
+            MethodAnnotationType,
+            VariableType,
+            VariableAnnotationType,
+            CommentType,
+        > + 'a,
+    ClassAnnotationType: Annotation<'a> + 'a,
+    MethodAnnotationType: Annotation<'a> + 'a,
+    VariableAnnotationType: Annotation<'a> + 'a,
+    MethodType: Method<'a, MethodAnnotationType, CommentType> + 'a,
+    VariableType: Member<'a, VariableAnnotationType, CommentType> + 'a,
     CommentType: From<String> + 'a,
 {
     let (input, _) = tag("namespace")(input)?;
@@ -51,11 +101,8 @@ where
     let mut classes = Vec::new();
     let mut comments = Vec::new();
 
-    let (input, (items, _)) = many_till(
-        parse_namespace_item,
-        preceded(multispace0, char('}')),
-    )
-    .parse(input)?;
+    let (input, (items, _)) =
+        many_till(parse_namespace_item, preceded(multispace0, char('}'))).parse(input)?;
     for item in items {
         match item {
             NamespaceItem::Namespace(namespace) => namespaces.push(namespace),
@@ -73,14 +120,42 @@ where
     ))
 }
 
-enum NamespaceItem<'a, NamespaceType, ClassType, VariableType, MethodType, CommentType>
-where
-    NamespaceType: Namespace<'a, ClassType, VariableType, MethodType, CommentType>,
-    ClassType: Class<'a, VariableType, MethodType, CommentType>,
-    MethodType: Method<'a, CommentType>,
-    VariableType: Member<'a, CommentType>,
-    CommentType: From<String>,
-    Self: 'a + Sized,
+enum NamespaceItem<
+    'a,
+    NamespaceType,
+    ClassType,
+    ClassAnnotationType,
+    VariableType,
+    VariableAnnotationType,
+    MethodType,
+    MethodAnnotationType,
+    CommentType,
+> where
+    NamespaceType: Namespace<
+            'a,
+            ClassType,
+            ClassAnnotationType,
+            VariableType,
+            VariableAnnotationType,
+            MethodType,
+            MethodAnnotationType,
+            CommentType,
+        > + 'a,
+    ClassType: Class<
+            'a,
+            ClassAnnotationType,
+            MethodType,
+            MethodAnnotationType,
+            VariableType,
+            VariableAnnotationType,
+            CommentType,
+        > + 'a,
+    ClassAnnotationType: Annotation<'a> + 'a,
+    MethodAnnotationType: Annotation<'a> + 'a,
+    VariableAnnotationType: Annotation<'a> + 'a,
+    MethodType: Method<'a, MethodAnnotationType, CommentType> + 'a,
+    VariableType: Member<'a, VariableAnnotationType, CommentType> + 'a,
+    CommentType: From<String> + 'a,
 {
     Ignore,
     Namespace(NamespaceType),
@@ -91,22 +166,68 @@ where
     End, // matched on `}` (+ optional `;`)
 
     #[doc(hidden)]
-    __Phantom(std::marker::PhantomData<&'a ()>),
+    __Phantom(
+        std::marker::PhantomData<(
+            &'a ClassAnnotationType,
+            &'a MethodAnnotationType,
+            &'a VariableAnnotationType,
+        )>,
+    ),
 }
 
-fn parse_namespace_item<'a, NamespaceType, ClassType, VariableType, MethodType, CommentType>(
+fn parse_namespace_item<
+    'a,
+    NamespaceType,
+    ClassType,
+    ClassAnnotationType,
+    VariableType,
+    VariableAnnotationType,
+    MethodType,
+    MethodAnnotationType,
+    CommentType,
+>(
     input: &'a str,
-)  -> IResult<
+) -> IResult<
     &'a str,
-    NamespaceItem<'a, NamespaceType, ClassType, VariableType, MethodType, CommentType>,
+    NamespaceItem<
+        'a,
+        NamespaceType,
+        ClassType,
+        ClassAnnotationType,
+        VariableType,
+        VariableAnnotationType,
+        MethodType,
+        MethodAnnotationType,
+        CommentType,
+    >,
     VerboseError<&'a str>,
 >
 where
-    NamespaceType: Namespace<'a, ClassType, VariableType, MethodType, CommentType>,
-    ClassType: Class<'a, VariableType, MethodType, CommentType>,
-    MethodType: Method<'a, CommentType>,
-    VariableType: Member<'a, CommentType>,
-    CommentType: From<String>,
+    NamespaceType: Namespace<
+            'a,
+            ClassType,
+            ClassAnnotationType,
+            VariableType,
+            VariableAnnotationType,
+            MethodType,
+            MethodAnnotationType,
+            CommentType,
+        > + 'a,
+    ClassType: Class<
+            'a,
+            ClassAnnotationType,
+            MethodType,
+            MethodAnnotationType,
+            VariableType,
+            VariableAnnotationType,
+            CommentType,
+        > + 'a,
+    ClassAnnotationType: Annotation<'a> + 'a,
+    MethodAnnotationType: Annotation<'a> + 'a,
+    VariableAnnotationType: Annotation<'a> + 'a,
+    MethodType: Method<'a, MethodAnnotationType, CommentType> + 'a,
+    VariableType: Member<'a, VariableAnnotationType, CommentType> + 'a,
+    CommentType: From<String> + 'a,
 {
     let (input, item) = preceded(
         multispace0,

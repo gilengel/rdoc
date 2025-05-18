@@ -1,20 +1,22 @@
 ﻿use crate::parser::cpp::alias::CppAlias;
 use crate::parser::cpp::class::CppClass;
 use crate::parser::cpp::member::CppMember;
-use crate::parser::cpp::method::{CppFunction, parse_method};
+use crate::parser::cpp::method::CppFunction;
 use crate::parser::cpp::namespace::CppNamespace;
+use crate::parser::generic::class::parse_class;
 use crate::parser::generic::member::parse_member;
+use crate::parser::generic::method::parse_method;
+use crate::parser::generic::namespace::parse_namespace;
 use crate::types::Parsable;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_till};
 use nom::bytes::take_until;
 use nom::character::complete::{char, multispace0, multispace1};
-use nom::combinator::{eof, map};
+use nom::combinator::map;
 use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded, terminated};
 use nom::{IResult, Parser};
 use nom_language::error::VerboseError;
-use crate::parser::generic::class::parse_class;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct CppHeader<'a> {
@@ -55,7 +57,6 @@ impl<'a> Parsable<'a> for CppHeader<'a> {
                 CppHeaderItem::Declaration(variable) => {
                     header.declarations.push(variable);
                 }
-                CppHeaderItem::End => {}
             },
         )
         .parse(input)?;
@@ -77,7 +78,6 @@ enum CppHeaderItem<'a> {
     Class(CppClass<'a>),
     Namespace(CppNamespace<'a>),
     Ignore,
-    End,
 }
 
 fn parse_header_item(input: &str) -> IResult<&str, CppHeaderItem, VerboseError<&str>> {
@@ -93,6 +93,7 @@ fn parse_header_item(input: &str) -> IResult<&str, CppHeaderItem, VerboseError<&
                 terminated(parse_member, char(';')),
                 CppHeaderItem::Declaration,
             ),
+            map(parse_namespace, CppHeaderItem::Namespace),
             map(parse_method, CppHeaderItem::Function),
             map(tag("\n"), |_| CppHeaderItem::Ignore),
         )),
@@ -102,9 +103,6 @@ fn parse_header_item(input: &str) -> IResult<&str, CppHeaderItem, VerboseError<&
     Ok((input, item))
 }
 
-fn newline_or_eof(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
-    alt((tag("\n"), eof)).parse(input)
-}
 pub fn parse_pragma(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
     preceded(tag("#pragma"), take_till(|c| c == '\n')).parse(input)
 }
@@ -123,7 +121,6 @@ pub fn parse_include(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
     Ok((input, file))
 }
 
-
 #[cfg(test)]
 mod tests {
     use crate::parser::cpp::class::CppClass;
@@ -133,9 +130,9 @@ mod tests {
     use crate::parser::cpp::member::CppMember;
     use crate::parser::cpp::member::CppMemberModifier::{Const, Static};
     use crate::parser::cpp::method::{CppFunction, CppFunctionInheritance};
+    use crate::parser::generic::class::{CppParentClass, InheritanceVisibility};
     use crate::types::Parsable;
     use std::collections::HashMap;
-    use crate::parser::generic::class::{CppParentClass, InheritanceVisibility};
 
     #[test]
     fn test_relative_include() {
@@ -193,29 +190,27 @@ mod tests {
                                 name: CType::Path(vec!["IModuleInterface"]),
                                 visibility: InheritanceVisibility::Public
                             }],
-                            methods: HashMap::from([
-                                (
-                                    InheritanceVisibility::Public,
-                                    vec![
-                                        CppFunction {
-                                            name: "StartupModule",
-                                            inheritance_modifiers: vec![
-                                                CppFunctionInheritance::Virtual,
-                                                CppFunctionInheritance::Override
-                                            ],
-                                            ..Default::default()
-                                        },
-                                        CppFunction {
-                                            name: "ShutdownModule",
-                                            inheritance_modifiers: vec![
-                                                CppFunctionInheritance::Virtual,
-                                                CppFunctionInheritance::Override
-                                            ],
-                                            ..Default::default()
-                                        }
-                                    ]
-                                ),
-                            ]),
+                            methods: HashMap::from([(
+                                InheritanceVisibility::Public,
+                                vec![
+                                    CppFunction {
+                                        name: "StartupModule",
+                                        inheritance_modifiers: vec![
+                                            CppFunctionInheritance::Virtual,
+                                            CppFunctionInheritance::Override
+                                        ],
+                                        ..Default::default()
+                                    },
+                                    CppFunction {
+                                        name: "ShutdownModule",
+                                        inheritance_modifiers: vec![
+                                            CppFunctionInheritance::Virtual,
+                                            CppFunctionInheritance::Override
+                                        ],
+                                        ..Default::default()
+                                    }
+                                ]
+                            ),]),
 
                             ..Default::default()
                         }

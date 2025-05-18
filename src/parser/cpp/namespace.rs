@@ -2,7 +2,7 @@
 use crate::parser::cpp::comment::CppComment;
 use crate::parser::cpp::member::CppMember;
 use crate::parser::cpp::method::CppFunction;
-
+use crate::parser::generic::annotation::NoAnnotation;
 use crate::parser::generic::namespace::Namespace;
 
 #[derive(Debug, PartialEq, Clone, Default)]
@@ -12,11 +12,20 @@ pub struct CppNamespace<'a> {
     pub classes: Vec<CppClass<'a>>,
     pub functions: Vec<CppFunction<'a>>,
     pub variables: Vec<CppMember<'a>>,
-    pub comments: Vec<CppComment>
+    pub comments: Vec<CppComment>,
 }
 
-impl<'a> Namespace<'a, CppClass<'a>, CppMember<'a>, CppFunction<'a>, CppComment>
-    for CppNamespace<'a>
+impl<'a>
+    Namespace<
+        'a,
+        CppClass<'a>,
+        NoAnnotation,
+        CppMember<'a>,
+        NoAnnotation,
+        CppFunction<'a>,
+        NoAnnotation,
+        CppComment,
+    > for CppNamespace<'a>
 {
     fn namespace(
         name: &'a str,
@@ -24,7 +33,7 @@ impl<'a> Namespace<'a, CppClass<'a>, CppMember<'a>, CppFunction<'a>, CppComment>
         functions: Vec<CppFunction<'a>>,
         variables: Vec<CppMember<'a>>,
         classes: Vec<CppClass<'a>>,
-        comments: Vec<CppComment>
+        comments: Vec<CppComment>,
     ) -> Self
     where
         Self: 'a + Sized,
@@ -35,7 +44,7 @@ impl<'a> Namespace<'a, CppClass<'a>, CppMember<'a>, CppFunction<'a>, CppComment>
             classes,
             functions,
             variables,
-            comments
+            comments,
         }
     }
 }

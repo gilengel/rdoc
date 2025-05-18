@@ -1,5 +1,6 @@
 ﻿use crate::parser::cpp::ctype::{CType, parse_cpp_type};
 use crate::parser::cpp::member::CppMemberModifier;
+use crate::parser::generic::annotation::Annotation;
 use crate::parser::generic::comment::parse_comment;
 use crate::parser::parse_ws_str;
 use nom::branch::alt;
@@ -16,24 +17,29 @@ pub enum MemberModifier {
     Const,
     Inline,
 }
-pub trait Member<'a, CommentType> {
+pub trait Member<'a, AnnotationType, CommentType> {
     fn member(
         name: &'a str,
         ctype: CType<'a>,
         default_value: Option<CType<'a>>,
         comment: Option<CommentType>,
         modifiers: Vec<CppMemberModifier>,
+        annotations: Vec<AnnotationType>,
     ) -> Self
     where
+        AnnotationType: Annotation<'a>,
         Self: 'a;
 }
-pub fn parse_member<'a, MemberType, CommentType>(
+pub fn parse_member<'a, MemberType, AnnotationType, CommentType>(
     input: &'a str,
 ) -> IResult<&'a str, MemberType, VerboseError<&'a str>>
 where
-    MemberType: 'a + Member<'a, CommentType>,
+    MemberType: 'a + Member<'a, AnnotationType, CommentType>,
     CommentType: From<String>,
+    AnnotationType: Annotation<'a>,
 {
+    let (input, annotations) = opt(many0(|i| AnnotationType::parse(i))).parse(input)?;
+
     let (input, comment) = opt(parse_comment::<CommentType>).parse(input)?;
     let (input, _) = multispace0.parse(input)?;
     let (input, modifiers) = parse_modifiers(input)?;
@@ -57,7 +63,7 @@ where
 
     Ok((
         input,
-        MemberType::member(name, ctype, default_value, comment, modifiers),
+        MemberType::member(name, ctype, default_value, comment, modifiers, annotations.unwrap_or_default()),
     ))
 }
 

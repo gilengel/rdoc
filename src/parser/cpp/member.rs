@@ -1,5 +1,6 @@
 ﻿use crate::parser::cpp::comment::CppComment;
 use crate::parser::cpp::ctype::CType;
+use crate::parser::generic::annotation::NoAnnotation;
 use crate::parser::generic::member::Member;
 
 #[derive(Debug, Eq, PartialEq, Clone, Default)]
@@ -11,13 +12,14 @@ pub struct CppMember<'a> {
     pub modifiers: Vec<CppMemberModifier>,
 }
 
-impl<'a> Member<'a, CppComment> for CppMember<'a> {
+impl<'a> Member<'a, NoAnnotation, CppComment> for CppMember<'a> {
     fn member(
         name: &'a str,
         ctype: CType<'a>,
         default_value: Option<CType<'a>>,
         comment: Option<CppComment>,
         modifiers: Vec<CppMemberModifier>,
+        _annotations: Vec<NoAnnotation>,
     ) -> Self
     where
         Self: 'a,
@@ -62,7 +64,6 @@ impl From<&str> for CppMemberModifier {
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::cpp::comment::CppComment;
     use crate::parser::cpp::ctype::CType::Path;
     use crate::parser::cpp::member::{CppMember, CppMemberModifier};
     use crate::parser::generic::member::parse_member;
@@ -71,7 +72,7 @@ mod tests {
     fn test_cpp_member_without_default_value() {
         let input = "int member";
         assert_eq!(
-            parse_member::<CppMember, CppComment>(input),
+            parse_member(input),
             Ok((
                 "",
                 CppMember {
@@ -88,7 +89,7 @@ mod tests {
         for modifier in vec!["static", "const", "inline"] {
             let input = format!("{} int member", modifier);
             assert_eq!(
-                parse_member::<CppMember, CppComment>(&input),
+                parse_member(&input),
                 Ok((
                     "",
                     CppMember {
@@ -106,7 +107,7 @@ mod tests {
     fn test_cpp_member_with_default_value() {
         for input in ["int member = 0", "int member {0}"] {
             assert_eq!(
-                parse_member::<CppMember, CppComment>(input),
+                parse_member(input),
                 Ok((
                     "",
                     CppMember {

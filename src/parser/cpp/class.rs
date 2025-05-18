@@ -5,6 +5,7 @@ use crate::parser::cpp::method::CppFunction;
 
 use crate::parser::generic::class::{Class, CppParentClass, InheritanceVisibility, parse_class};
 
+use crate::parser::generic::annotation::NoAnnotation;
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -30,7 +31,10 @@ impl Default for CppClass<'_> {
     }
 }
 
-impl<'a> Class<'a, CppMember<'a>, CppFunction<'a>, CppComment> for CppClass<'a> {
+impl<'a>
+    Class<'a, NoAnnotation, CppFunction<'a>, NoAnnotation, CppMember<'a>, NoAnnotation, CppComment>
+    for CppClass<'a>
+{
     fn class(
         name: &'a str,
         api: Option<&'a str>,
@@ -38,6 +42,7 @@ impl<'a> Class<'a, CppMember<'a>, CppFunction<'a>, CppComment> for CppClass<'a> 
         methods: HashMap<InheritanceVisibility, Vec<CppFunction<'a>>>,
         members: HashMap<InheritanceVisibility, Vec<CppMember<'a>>>,
         inner_classes: HashMap<InheritanceVisibility, Vec<CppClass<'a>>>,
+        _annotation: Option<Vec<NoAnnotation>>,
     ) -> Self
     where
         Self: 'a,
@@ -164,15 +169,13 @@ mod tests {
                 "",
                 CppClass {
                     name: "Test",
-                    inner_classes: HashMap::from([
-                        (
-                            InheritanceVisibility::Private,
-                            vec![CppClass {
-                                name: "Inner",
-                                ..CppClass::default()
-                            }]
-                        ),
-                    ]),
+                    inner_classes: HashMap::from([(
+                        InheritanceVisibility::Private,
+                        vec![CppClass {
+                            name: "Inner",
+                            ..CppClass::default()
+                        }]
+                    ),]),
                     ..CppClass::default()
                 }
             ))
@@ -193,15 +196,13 @@ mod tests {
                 "",
                 CppClass {
                     name: "Test",
-                    methods: HashMap::from([
-                        (
-                            InheritanceVisibility::Private,
-                            vec![CppFunction {
-                                name: "Test",
-                                ..Default::default()
-                            }]
-                        ),
-                    ]),
+                    methods: HashMap::from([(
+                        InheritanceVisibility::Private,
+                        vec![CppFunction {
+                            name: "Test",
+                            ..Default::default()
+                        }]
+                    ),]),
                     ..CppClass::default()
                 }
             ))
@@ -315,7 +316,6 @@ mod tests {
                 ))
             );
         }
-
     }
 
     #[test]

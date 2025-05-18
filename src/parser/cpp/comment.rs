@@ -1,4 +1,4 @@
-﻿#[derive(Debug, Eq, PartialEq, Clone)]
+﻿#[derive(Debug, Eq, PartialEq, Clone, Default)]
 pub struct CppComment {
     pub comment: String,
 }

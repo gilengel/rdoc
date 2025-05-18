@@ -86,9 +86,9 @@ impl<'a> Default for CppFunction<'a> {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct CppMethodParam<'a> {
-    name: Option<&'a str>,
-    ctype: CType<'a>,
-    is_const: bool,
+    pub name: Option<&'a str>,
+    pub ctype: CType<'a>,
+    pub is_const: bool,
 }
 
 fn parse_cpp_method_param(input: &str) -> IResult<&str, CppMethodParam, VerboseError<&str>> {

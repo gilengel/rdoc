@@ -5,6 +5,8 @@ use nom::bytes::complete::{escaped, take_while1};
 use nom::sequence::delimited;
 
 pub mod cpp;
+
+pub mod ue;
 pub mod generic;
 
 pub fn ws<'a, O, E: ParseError<&'a str>, F>(inner: F) -> impl Parser<&'a str, Output = O, Error = E>

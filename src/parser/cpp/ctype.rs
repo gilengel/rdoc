@@ -14,12 +14,13 @@ use nom_language::error::VerboseError;
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum CType<'a> {
     Auto,
-    Path(Vec<&'a str>),                       // std::enable_if_t
-    Generic(Box<CType<'a>>, Vec<CType<'a>>),  // std::vector<int>
-    Function(Box<CType<'a>>, Vec<CType<'a>>), // return‐type + params
-    Pointer(Box<CType<'a>>),                  // *
-    Reference(Box<CType<'a>>),                // &
-    MemberAccess(Box<CType<'a>>, &'a str),    // ...::value
+    Path(Vec<&'a str>),
+    Generic(Box<CType<'a>>, Vec<CType<'a>>),
+    Function(Box<CType<'a>>, Vec<CType<'a>>),
+    Pointer(Box<CType<'a>>),
+    Reference(Box<CType<'a>>),
+    MemberAccess(Box<CType<'a>>, &'a str),
+    Const(Box<CType<'a>>), // <- NEW!
 }
 
 impl Default for CType<'static> {
@@ -47,7 +48,8 @@ fn parse_generics<'a>(
             preceded(multispace0, parse_type),
         ),
         preceded(multispace0, char('>')),
-    )).parse(input)?;
+    ))
+    .parse(input)?;
 
     let out = match opt_generics {
         Some(args) => CType::Generic(Box::new(ty), args),
@@ -57,7 +59,10 @@ fn parse_generics<'a>(
     Ok((input, out))
 }
 
-fn parse_member_access<'a>(input: &'a str, mut ty: CType<'a>) -> IResult<&'a str, CType<'a>, VerboseError<&'a str>> {
+fn parse_member_access<'a>(
+    input: &'a str,
+    mut ty: CType<'a>,
+) -> IResult<&'a str, CType<'a>, VerboseError<&'a str>> {
     let (input, members) = many0(preceded(tag("::"), identifier)).parse(input)?;
     for m in members {
         ty = CType::MemberAccess(Box::new(ty), m);
@@ -103,24 +108,61 @@ fn parse_ptrs_refs<'a>(
     Ok((input, ty))
 }
 
-
 fn parse_type(input: &str) -> IResult<&str, CType, VerboseError<&str>> {
+    // Parse optional leading const
+    let (input, leading_const) = opt(preceded(multispace0, tag("const"))).parse(input)?;
+
+    // Parse the actual type atom (path)
     let (input, base) = parse_type_atom(input)?;
     let (input, base) = parse_generics(input, base)?;
     let (input, base) = parse_member_access(input, base)?;
     let (input, base) = parse_function(input, base)?;
+
+    // Parse optional trailing const
+    let (input, trailing_const) = opt(preceded(multispace0, tag("const"))).parse(input)?;
+
+    // Apply const if present either before or after
+    let base = if leading_const.is_some() || trailing_const.is_some() {
+        CType::Const(Box::new(base))
+    } else {
+        base
+    };
+
+    // Parse pointers and references
     let (input, base) = parse_ptrs_refs(base, input)?;
+
     Ok((input, base))
 }
 
-fn parse_type_atom(input: &str) -> IResult<&str, CType, VerboseError<&str>> {
-    map(separated_list0(tag("::"), identifier), |segments| {
+fn cpp_ident(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
+    preceded(
+        opt(preceded(multispace0, alt((tag("class"), tag("typename"))))),
+        preceded(multispace0, identifier),
+    ).parse(input)
+}
+fn parse_type_atom_inner(input: &str) -> IResult<&str, CType, VerboseError<&str>> {
+    map(separated_list0(tag("::"), cpp_ident), |segments| {
         if segments.len() == 1 && segments[0] == "auto" {
             CType::Auto
         } else {
             CType::Path(segments)
         }
     }).parse(input)
+}
+
+fn parse_type_atom(input: &str) -> IResult<&str, CType, VerboseError<&str>> {
+    let (input, is_const_before) = opt(preceded(multispace0, tag("const"))).parse(input)?;
+    let (input, base) = parse_type_atom_inner(input)?;
+    let (input, is_const_after) = opt(preceded(multispace0, tag("const"))).parse(input)?;
+
+    let mut ty = base;
+    if is_const_before.is_some() {
+        ty = CType::Const(Box::new(ty));
+    }
+    if is_const_after.is_some() {
+        ty = CType::Const(Box::new(ty));
+    }
+    Ok((input, ty))
 }
 
 pub fn parse_cpp_type(input: &str) -> IResult<&str, CType, VerboseError<&str>> {
@@ -144,6 +186,30 @@ mod tests {
         assert_eq!(
             ty,
             Generic(Box::new(Path(vec!["String"])), vec![Path(vec!["Some"])])
+        );
+    }
+
+    #[test]
+    fn test_const(){
+        assert_eq!(
+            parse_cpp_type("const int&"),
+            Ok((
+                "",
+                CType::Reference(Box::new(CType::Const(Box::new(CType::Path(vec!["int"]))))),
+            ))
+        );
+
+        assert_eq!(
+            parse_cpp_type("const std::vector<int>*"),
+            Ok((
+                "",
+                CType::Pointer(Box::new(CType::Const(Box::new(
+                    CType::Generic(
+                        Box::new(CType::Path(vec!["std", "vector"])),
+                        vec![CType::Path(vec!["int"])]
+                    )
+                )))),
+            ))
         );
     }
 

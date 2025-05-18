@@ -88,7 +88,7 @@ fn parse_header_item(input: &str) -> IResult<&str, CppHeaderItem, VerboseError<&
             map(parse_include, |include| CppHeaderItem::Include(include)),
             map(parse_define, |define| CppHeaderItem::Define(define)),
             map(<CppAlias as Parsable>::parse, CppHeaderItem::Alias),
-            map(parse_class, CppHeaderItem::Class),
+            map(|i| parse_class(i, &vec![]), CppHeaderItem::Class),
             map(
                 terminated(parse_member, char(';')),
                 CppHeaderItem::Declaration,

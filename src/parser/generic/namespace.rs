@@ -234,7 +234,7 @@ where
         alt((
             map(char(';'), |_| NamespaceItem::Ignore),
             map(parse_namespace, NamespaceItem::Namespace),
-            map(parse_class, NamespaceItem::Class),
+            map(|i|parse_class(i, &vec![]), NamespaceItem::Class),
             map(parse_method, NamespaceItem::Method),
             map(parse_member, NamespaceItem::Variable),
             map(parse_comment, NamespaceItem::Comment),

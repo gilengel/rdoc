@@ -7,14 +7,14 @@ use crate::parser::generic::method::{Method, parse_method};
 use crate::parser::{parse_ws_str, ws};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_until};
-use nom::character::complete::{char, multispace0};
-use nom::combinator::{map, opt, value};
-use nom::multi::{many_till, separated_list1};
+use nom::character::complete::{char, multispace0, multispace1};
+use nom::combinator::{map, map_res, opt, value};
+use nom::error::ParseError;
+use nom::multi::{many_till, many0, separated_list1};
 use nom::sequence::{delimited, preceded, terminated};
 use nom::{IResult, Parser};
 use nom_language::error::VerboseError;
 use std::collections::HashMap;
-use std::marker::PhantomData;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct CppParentClass<'a> {
@@ -41,38 +41,6 @@ impl From<&str> for InheritanceVisibility {
             _ => InheritanceVisibility::Empty,
         }
     }
-}
-
-#[derive(Debug, Eq, PartialEq, Clone, Default)]
-pub struct GClass<
-    'a,
-    ClassAnnotationType,
-    MethodType,
-    MethodAnnotationType,
-    MemberType,
-    MemberAnnotationType,
-    CommentType,
-> where
-    ClassAnnotationType: Annotation<'a> + 'a,
-    MethodAnnotationType: Annotation<'a> + 'a,
-    MemberAnnotationType: Annotation<'a> + 'a,
-    MethodType: Method<'a, MethodAnnotationType, CommentType> + 'a,
-    MemberType: Member<'a, MemberAnnotationType, CommentType> + 'a,
-    CommentType: From<String>,
-{
-    pub name: &'a str,
-    pub parents: Vec<CppParentClass<'a>>,
-    pub methods: HashMap<InheritanceVisibility, Vec<MethodType>>,
-    pub members: HashMap<InheritanceVisibility, Vec<MemberType>>,
-    pub inner_classes: HashMap<InheritanceVisibility, Vec<Self>>,
-    pub annotations: Option<Vec<ClassAnnotationType>>,
-
-    pub _marker: PhantomData<(
-        CommentType,
-        ClassAnnotationType,
-        MethodAnnotationType,
-        MemberAnnotationType,
-    )>,
 }
 
 pub trait Class<
@@ -121,6 +89,7 @@ pub fn parse_class<
     CommentType,
 >(
     input: &'a str,
+    ignore_statements: &Vec<fn(&'a str) -> IResult<&'a str, &'a str, VerboseError<&'a str>>>,
 ) -> IResult<&'a str, ClassType, VerboseError<&'a str>>
 where
     ClassAnnotationType: Annotation<'a> + 'a,
@@ -139,6 +108,9 @@ where
             CommentType,
         > + 'a,
 {
+    let (input, comment) = opt(parse_comment::<CommentType>).parse(input)?;
+    let (input, annotations) = opt(many0(|i| ClassAnnotationType::parse(i))).parse(input)?;
+
     let (input, _) = opt(parse_template).parse(input)?;
     let (input, _) = parse_class_identifier(input)?;
     let (input, maybe_api) = parse_ws_str(input)?;
@@ -168,7 +140,7 @@ where
                 HashMap::new(),
                 HashMap::new(),
                 HashMap::new(),
-                None,
+                annotations,
             ),
         ));
     }
@@ -184,15 +156,17 @@ where
     let (input, _) = char('{')(input)?;
     let mut current_access = InheritanceVisibility::Private;
     let (input, (items, _)) = many_till(
-        parse_class_item::<
-            ClassType,
-            ClassAnnotationType,
-            MethodType,
-            MethodAnnotationType,
-            MemberType,
-            MemberAnnotationType,
-            CommentType,
-        >,
+        |i| {
+            parse_class_item::<
+                ClassType,
+                ClassAnnotationType,
+                MethodType,
+                MethodAnnotationType,
+                MemberType,
+                MemberAnnotationType,
+                CommentType,
+            >(i, ignore_statements)
+        },
         preceded(multispace0, char('}')),
     )
     .parse(input)?;
@@ -220,7 +194,7 @@ where
             methods,
             members,
             inner_classes,
-            None,
+            annotations,
         ),
     ))
 }
@@ -311,6 +285,56 @@ fn parse_inheritance(input: &str) -> IResult<&str, Vec<CppParentClass>, VerboseE
     Ok((input, parent_classes))
 }
 
+fn try_ignore<
+    'a,
+    ClassType,
+    ClassAnnotationType,
+    MethodType,
+    MethodAnnotationType,
+    MemberType,
+    MemberAnnotationType,
+    CommentType,
+>(
+    input: &'a str,
+    ignore_parsers: &Vec<fn(&'a str) -> IResult<&'a str, &'a str, VerboseError<&'a str>>>,
+) -> Option<(
+    &'a str,
+    ClassItem<
+        'a,
+        ClassType,
+        ClassAnnotationType,
+        MethodType,
+        MethodAnnotationType,
+        MemberType,
+        MemberAnnotationType,
+        CommentType,
+    >,
+)>
+where
+    ClassAnnotationType: Annotation<'a> + 'a,
+    MethodAnnotationType: Annotation<'a> + 'a,
+    MemberAnnotationType: Annotation<'a> + 'a,
+    MethodType: Method<'a, MethodAnnotationType, CommentType> + 'a,
+    MemberType: Member<'a, MemberAnnotationType, CommentType> + 'a,
+    CommentType: From<String>,
+    ClassType: Class<
+            'a,
+            ClassAnnotationType,
+            MethodType,
+            MethodAnnotationType,
+            MemberType,
+            MemberAnnotationType,
+            CommentType,
+        >,
+{
+    for parser in ignore_parsers {
+        if let Ok((i, _)) = parser(input) {
+            return Some((i, ClassItem::Ignore));
+        }
+    }
+    None
+}
+
 fn parse_class_item<
     'a,
     ClassType,
@@ -322,6 +346,7 @@ fn parse_class_item<
     CommentType,
 >(
     input: &'a str,
+    ignore_statements: &Vec<fn(&'a str) -> IResult<&'a str, &'a str, VerboseError<&'a str>>>,
 ) -> IResult<
     &'a str,
     ClassItem<
@@ -356,9 +381,24 @@ where
     let (input, item) = preceded(
         multispace0,
         alt((
-            map(char(';'), |_| ClassItem::Ignore),
+            map_res(
+                |input| {
+                    for parser in ignore_statements {
+                        if let Ok((next_input, _)) = parser(input) {
+                            return Ok((next_input, ClassItem::Ignore));
+                        }
+                    }
+                    Err(nom::Err::Error(VerboseError::from_error_kind(
+                        input,
+                        nom::error::ErrorKind::Alt,
+                    )))
+                },
+                Ok::<_, VerboseError<&str>>,
+            ),
+            map(alt((char(';'), char('\n'))), |_| ClassItem::Ignore),
+            map(multispace1, |_| ClassItem::Ignore),
             map(access_specifier, ClassItem::Access),
-            map(parse_class, ClassItem::Class),
+            map(|i| parse_class(i, ignore_statements), ClassItem::Class),
             map(parse_method, ClassItem::Method),
             map(parse_member, ClassItem::Member),
             map(parse_comment, ClassItem::Comment),

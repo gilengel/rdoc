@@ -84,7 +84,7 @@ mod tests {
     fn test_parse_empty_cpp_with_inheritance_class() {
         for visibility in ["private", "protected", "public", ""] {
             let input = format!("class test : {visibility} a {{}};");
-            let result = parse_class(&input);
+            let result = parse_class(&input, &vec![]);
 
             assert_eq!(
                 result,
@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn test_empty_struct() {
         let input = "struct Test {};";
-        let result = parse_class(&input);
+        let result = parse_class(&input, &vec![]);
         assert_eq!(
             result,
             Ok((
@@ -125,7 +125,7 @@ mod tests {
         struct Test<int>
         {
         };"#;
-        let result = parse_class(&input);
+        let result = parse_class(&input, &vec![]);
 
         assert_eq!(
             result,
@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn test_parse_empty_struct() {
         let input = "struct Test {};";
-        let result = parse_class(&input);
+        let result = parse_class(&input, &vec![]);
 
         assert_eq!(
             result,
@@ -161,7 +161,7 @@ mod tests {
         let input = r#"struct Test {
             struct Inner {}
         };"#;
-        let result = parse_class(&input);
+        let result = parse_class(&input, &vec![]);
 
         assert_eq!(
             result,
@@ -188,7 +188,7 @@ mod tests {
         {
             Test(){};
         };"#;
-        let result = parse_class(&input);
+        let result = parse_class(&input, &vec![]);
 
         assert_eq!(
             result,
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn test_parse_empty_templated_struct() {
         let input = "template<typename T>\nstruct Test {};";
-        let result = parse_class(&input);
+        let result = parse_class(&input, &vec![]);
 
         assert_eq!(
             result,
@@ -229,7 +229,7 @@ mod tests {
     #[test]
     fn test_parse_empty_cpp_with_multiple_inheritance_classes() {
         let input = "class test : public a, private b {};";
-        let result = parse_class(&input);
+        let result = parse_class(&input, &vec![]);
 
         assert_eq!(
             result,
@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn test_parse_empty_cpp_with_namespaced_inheritance_class() {
         let input = "class test : public namespace::a {};";
-        let result = parse_class(&input);
+        let result = parse_class(&input, &vec![]);
 
         assert_eq!(
             result,
@@ -296,7 +296,7 @@ mod tests {
         };"#;
 
         for input in [input1, input2] {
-            let result = parse_class(&input);
+            let result = parse_class(&input, &vec![]);
 
             assert_eq!(
                 result,
@@ -321,7 +321,7 @@ mod tests {
     #[test]
     fn test_parse_empty_cpp_with_api() {
         let input = format!("class MY_API test {{}};");
-        let result = parse_class(&input);
+        let result = parse_class(&input, &vec![]);
 
         assert_eq!(
             result,
@@ -345,7 +345,7 @@ mod tests {
                 random_whitespace_string(),
                 random_newline_string()
             );
-            let result = parse_class(&input);
+            let result = parse_class(&input, &vec![]);
 
             assert_eq!(
                 result,
@@ -365,7 +365,7 @@ mod tests {
         let input = r#"class test {
                 void hello();
             };"#;
-        let result = parse_class(&input);
+        let result = parse_class(&input, &vec![]);
 
         assert_eq!(
             result,
@@ -389,7 +389,7 @@ mod tests {
     #[test]
     fn test_parse_class_with_multiple_methods() {
         let input = "class test {void hello();\nvoid goodbye();};";
-        let result = parse_class(&input);
+        let result = parse_class(&input, &vec![]);
 
         assert_eq!(
             result,
@@ -422,7 +422,7 @@ mod tests {
 #[test]
 fn test_parse_class_with_multiple_mixed_methods() {
     let input = format!("class test {{void hello();\nauto goodbye() -> int;}}");
-    let result = parse_class(&input);
+    let result = parse_class(&input, &vec![]);
 
     assert_eq!(
         result,
@@ -472,7 +472,7 @@ fn test_simple_class() {
             int count{0};
     };"#;
 
-    let result = parse_class(input);
+    let result = parse_class(input, &vec![]);
 
     assert_eq!(
         result,

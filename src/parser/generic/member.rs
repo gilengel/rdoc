@@ -17,6 +17,7 @@ pub enum MemberModifier {
     Const,
     Inline,
 }
+
 pub trait Member<'a, AnnotationType, CommentType> {
     fn member(
         name: &'a str,
@@ -38,9 +39,9 @@ where
     CommentType: From<String>,
     AnnotationType: Annotation<'a>,
 {
-    let (input, annotations) = opt(many0(|i| AnnotationType::parse(i))).parse(input)?;
-
     let (input, comment) = opt(parse_comment::<CommentType>).parse(input)?;
+
+    let (input, annotations) = opt(many0(|i| AnnotationType::parse(i))).parse(input)?;
     let (input, _) = multispace0.parse(input)?;
     let (input, modifiers) = parse_modifiers(input)?;
     let (input, _) = multispace0.parse(input)?;

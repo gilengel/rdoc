@@ -2,7 +2,6 @@
 use crate::parser::cpp::ctype::{CType, parse_cpp_type};
 use crate::parser::cpp::template::parse_template;
 use crate::parser::{parse_type_str, parse_ws_str, ws};
-use crate::types::Parsable;
 use nom::branch::alt;
 use nom::bytes::complete::{take_till1, take_until};
 use nom::character::complete::{char, multispace0, none_of};
@@ -11,6 +10,7 @@ use nom::multi::{many0, separated_list0, separated_list1};
 use nom::sequence::{delimited, preceded};
 use nom::{IResult, Parser, bytes::complete::tag};
 use nom_language::error::VerboseError;
+use crate::parser::generic::comment::parse_comment;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum CppFunctionInheritance {
@@ -43,6 +43,45 @@ pub struct CppFunction<'a> {
     pub comment: Option<CppComment>,
 }
 
+pub trait Method<'a, CommentType> {
+    fn method(
+        name: &'a str,
+        return_type: Option<CType<'a>>,
+        template_params: Vec<CType<'a>>,
+        params: Vec<CppMethodParam<'a>>,
+        inheritance_modifiers: Vec<CppFunctionInheritance>,
+        is_const: bool,
+        is_interface: bool,
+        comment: Option<CommentType>,
+    ) -> Self
+    where
+        Self: 'a;
+}
+
+impl<'a> Method<'a, CppComment> for CppFunction<'a> {
+    fn method(
+        name: &'a str,
+        return_type: Option<CType<'a>>,
+        template_params: Vec<CType<'a>>,
+        params: Vec<CppMethodParam<'a>>,
+        inheritance_modifiers: Vec<CppFunctionInheritance>,
+        is_const: bool,
+        is_interface: bool,
+        comment: Option<CppComment>,
+    ) -> Self {
+        CppFunction {
+            name,
+            return_type,
+            template_params,
+            params,
+            inheritance_modifiers,
+            is_const,
+            is_interface,
+            comment,
+        }
+    }
+}
+
 impl<'a> Default for CppFunction<'a> {
     fn default() -> Self {
         Self {
@@ -58,90 +97,91 @@ impl<'a> Default for CppFunction<'a> {
     }
 }
 
-impl<'a> Parsable<'a> for CppFunction<'a>
+pub fn parse_method<'a, T, CommentType>(input: &'a str) -> IResult<&'a str, T, VerboseError<&'a str>>
+where
+    CommentType: From<String>,
+    T: 'a + Method<'a, CommentType>,
 {
-    fn parse(input: &'a str) -> IResult<&'a str, Self, VerboseError<&'a str>> {
-        let (input, _) = multispace0.parse(input)?;
-        let (input, comment) = opt(CppComment::parse).parse(input)?;
-        let (input, _) = multispace0.parse(input)?;
-        let (input, _) = opt(parse_template).parse(input)?;
+    let (input, _) = multispace0.parse(input)?;
+    let (input, comment) = opt(parse_comment::<CommentType>).parse(input)?;
+    let (input, _) = multispace0.parse(input)?;
+    let (input, _) = opt(parse_template).parse(input)?;
 
-        let (input, all_before_params) = take_until("(").parse(input)?;
+    let (input, all_before_params) = take_until("(").parse(input)?;
 
-        let (_, all_before_params) =
-            separated_list1(tag(" "), parse_type_str).parse(all_before_params)?;
-        let all_before_params = all_before_params
-            .iter()
-            .filter(|x| **x != "")
-            .map(|x| *x)
-            .collect::<Vec<&str>>();
+    let (_, all_before_params) =
+        separated_list1(tag(" "), parse_type_str).parse(all_before_params)?;
+    let all_before_params = all_before_params
+        .iter()
+        .filter(|x| **x != "")
+        .map(|x| *x)
+        .collect::<Vec<&str>>();
 
-        let mut return_type = None;
-        let name: &str = all_before_params.last().unwrap();
+    let mut return_type = None;
+    let name: &str = all_before_params.last().unwrap();
 
-        // we eiter have auto {method_name} or {return_type} {method_name} -> no constructor
-        if all_before_params.len() > 1 {}
+    // we eiter have auto {method_name} or {return_type} {method_name} -> no constructor
+    if all_before_params.len() > 1 {}
 
-        let (mut input, params) = ws(parse_method_params).parse(input)?;
+    let (mut input, params) = ws(parse_method_params).parse(input)?;
 
-        if all_before_params.contains(&"auto") {
-            let (i, ctype) = preceded(ws((tag("->"), multispace0)), parse_cpp_type).parse(input)?;
-            input = i;
+    if all_before_params.contains(&"auto") {
+        let (i, ctype) = preceded(ws((tag("->"), multispace0)), parse_cpp_type).parse(input)?;
+        input = i;
 
-            return_type = Some(ctype);
-        } else if all_before_params.len() > 1 {
-            let ctype = all_before_params[all_before_params.len() - 2];
-            let ctype = parse_cpp_type.parse(ctype)?.1;
+        return_type = Some(ctype);
+    } else if all_before_params.len() > 1 {
+        let ctype = all_before_params[all_before_params.len() - 2];
+        let ctype = parse_cpp_type.parse(ctype)?.1;
 
-            return_type = Some(ctype);
-        }
-
-        if return_type == Some(CType::Path(vec!["void"])) {
-            return_type = None;
-        }
-
-        let (input, _) = multispace0(input)?;
-
-        let (input, function_params) = separated_list0(tag(","), parse_ws_str).parse(input)?;
-
-        let (input, is_interface) = opt(interface).parse(input)?;
-
-        let (input, _) = opt(parse_brace_block).parse(input)?;
-
-        let mut inheritance_modifiers = Vec::new();
-
-        if all_before_params.contains(&"static") {
-            inheritance_modifiers.push(CppFunctionInheritance::Static);
-        }
-
-        if all_before_params.contains(&"virtual") {
-            inheritance_modifiers.push(CppFunctionInheritance::Virtual);
-        }
-
-        if function_params.contains(&"override") {
-            inheritance_modifiers.push(CppFunctionInheritance::Override);
-        }
-
-        if function_params.contains(&"final") {
-            inheritance_modifiers.push(CppFunctionInheritance::Final);
-        }
-
-        let is_const = function_params.contains(&"const");
-
-        Ok((
-            input,
-            CppFunction {
-                name,
-                return_type,
-                params,
-                inheritance_modifiers,
-                is_const,
-                is_interface: is_interface.is_some(),
-                template_params: vec![],
-                comment,
-            },
-        ))
+        return_type = Some(ctype);
     }
+
+    if return_type == Some(CType::Path(vec!["void"])) {
+        return_type = None;
+    }
+
+    let (input, _) = multispace0(input)?;
+
+    let (input, function_params) = separated_list0(tag(","), parse_ws_str).parse(input)?;
+
+    let (input, is_interface) = opt(interface).parse(input)?;
+
+    let (input, _) = opt(parse_brace_block).parse(input)?;
+
+    let mut inheritance_modifiers = Vec::new();
+
+    if all_before_params.contains(&"static") {
+        inheritance_modifiers.push(CppFunctionInheritance::Static);
+    }
+
+    if all_before_params.contains(&"virtual") {
+        inheritance_modifiers.push(CppFunctionInheritance::Virtual);
+    }
+
+    if function_params.contains(&"override") {
+        inheritance_modifiers.push(CppFunctionInheritance::Override);
+    }
+
+    if function_params.contains(&"final") {
+        inheritance_modifiers.push(CppFunctionInheritance::Final);
+    }
+
+    let is_const = function_params.contains(&"const");
+
+    Ok((
+        input,
+        T::method(
+            name,
+            return_type,
+            vec![],
+            params,
+            inheritance_modifiers,
+            is_const,
+            is_interface.is_some(),
+            comment,
+        ),
+    ))
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -150,6 +190,7 @@ pub struct CppMethodParam<'a> {
     ctype: CType<'a>,
     is_const: bool,
 }
+
 fn parse_cpp_method_param(input: &str) -> IResult<&str, CppMethodParam, VerboseError<&str>> {
     let (input, is_const) = opt(tag("const")).parse(input)?;
     let (input, _) = multispace0(input)?;
@@ -215,9 +256,8 @@ mod tests {
     use crate::parser::cpp::ctype::CType::{Function, Generic, Path, Pointer, Reference};
     use crate::parser::cpp::method::CppFunctionInheritance::{Final, Static, Virtual};
     use crate::parser::cpp::method::{
-        CppFunction, CppFunctionInheritance, CppMethodParam, parse_brace_block,
+        CppFunction, CppFunctionInheritance, CppMethodParam, parse_brace_block, parse_method,
     };
-    use crate::types::Parsable;
 
     #[test]
     fn test_empty_braces() {
@@ -246,7 +286,7 @@ mod tests {
     #[test]
     fn test_method_without_params() {
         let input = "void method()";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -263,7 +303,7 @@ mod tests {
     #[test]
     fn test_interface_method() {
         let input = "void method() = 0";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -283,7 +323,7 @@ mod tests {
         let input = r#"void method(){
             int i=42;
         }"#;
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -301,7 +341,7 @@ mod tests {
     fn test_inline_method_oneline_without_params() {
         let input = r#"            // Say hello to everyone
             void sayHello(){ std::cout << "Hi" << std::endl; }"#;
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -324,7 +364,7 @@ mod tests {
             // does something
             void method()
         "#;
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -352,7 +392,7 @@ mod tests {
             void method()
         "#;
 
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -379,7 +419,7 @@ mod tests {
                 _ => vec![],
             };
 
-            let result = CppFunction::parse(&input);
+            let result = parse_method::<CppFunction, CppComment>(&input);
 
             assert_eq!(
                 result,
@@ -399,7 +439,7 @@ mod tests {
     fn test_method_with_inheritance_modifier() {
         for inheritance_modifier in ["override", "final"] {
             let input = format!("virtual void method() {}", inheritance_modifier);
-            let result = CppFunction::parse(&input);
+            let result = parse_method::<CppFunction, CppComment>(&input);
 
             assert_eq!(
                 result,
@@ -421,7 +461,7 @@ mod tests {
     #[test]
     fn test_method_with_param() {
         let input = "void method(int a) final";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -444,7 +484,7 @@ mod tests {
     #[test]
     fn test_method_with_template_return_type() {
         let input = "TArray<int32> method()";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -465,7 +505,7 @@ mod tests {
     #[test]
     fn test_method_with_reference_param() {
         let input = "void method(int& a) final";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -488,7 +528,7 @@ mod tests {
     #[test]
     fn test_method_with_const_reference_param() {
         let input = "void method(const int& a) final";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -511,7 +551,7 @@ mod tests {
     #[test]
     fn test_method_with_pointer_param() {
         let input = "void method(int* a) final";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -534,7 +574,7 @@ mod tests {
     #[test]
     fn test_method_with_multiple_params() {
         let input = "void method(int& a, std::string b) final";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -564,7 +604,7 @@ mod tests {
     #[test]
     fn test_method_with_template_param() {
         let input = "void method(TArray<int32> a) final";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -587,7 +627,7 @@ mod tests {
     #[test]
     fn test_const_method() {
         let input = "void method() const";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -605,7 +645,7 @@ mod tests {
     #[test]
     fn test_method_with_trailing_return_type() {
         let input = "auto method(int* a) -> int** final";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -629,7 +669,7 @@ mod tests {
     #[test]
     fn test_method_with_lambda_param() {
         let input = "auto method(std::function<int(int)>& lambda) -> int";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -658,7 +698,7 @@ mod tests {
     #[test]
     fn test_template_method() {
         let input = "template<typename T>T method()";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -676,7 +716,7 @@ mod tests {
     #[test]
     fn test_template_enable_if_method() {
         let input = "template<typename Integer, typename = std::enable_if_t<std::is_integral<Integer>::value>> void method(Integer a)";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -699,7 +739,7 @@ mod tests {
     #[test]
     fn test_method_with_unnamed_param() {
         let input = "void method(int)";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -722,7 +762,7 @@ mod tests {
     #[test]
     fn test_empty_template_method() {
         let input = "template<> void method()";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
 
         assert_eq!(
             result,
@@ -739,7 +779,7 @@ mod tests {
 
     fn test_multiple_templates_method() {
         let input = "template<typename T, class S>T method()";
-        let result = CppFunction::parse(input);
+        let result = parse_method::<CppFunction, CppComment>(input);
         assert_eq!(
             result,
             Ok((

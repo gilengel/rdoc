@@ -1,15 +1,6 @@
 ﻿use crate::parser::cpp::comment::CppComment;
-use crate::parser::cpp::ctype::{CType, parse_cpp_type};
-use nom::branch::alt;
-use nom::bytes::complete::tag;
-use nom::character::complete::{char, multispace0};
-use nom::combinator::{map, opt};
-use nom::multi::many0;
-use nom::sequence::{delimited, preceded};
-use nom::{IResult, Parser};
-use nom_language::error::VerboseError;
-use crate::parser::parse_ws_str;
-use crate::types::Parsable;
+use crate::parser::cpp::ctype::CType;
+use crate::parser::generic::member::Member;
 
 #[derive(Debug, Eq, PartialEq, Clone, Default)]
 pub struct CppMember<'a> {
@@ -18,6 +9,27 @@ pub struct CppMember<'a> {
     pub default_value: Option<CType<'a>>,
     pub comment: Option<CppComment>,
     pub modifiers: Vec<CppMemberModifier>,
+}
+
+impl<'a> Member<'a, CppComment> for CppMember<'a> {
+    fn member(
+        name: &'a str,
+        ctype: CType<'a>,
+        default_value: Option<CType<'a>>,
+        comment: Option<CppComment>,
+        modifiers: Vec<CppMemberModifier>,
+    ) -> Self
+    where
+        Self: 'a,
+    {
+        Self {
+            name,
+            ctype,
+            default_value,
+            comment,
+            modifiers,
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -48,65 +60,18 @@ impl From<&str> for CppMemberModifier {
     }
 }
 
-impl<'a> Parsable<'a> for CppMember<'a> {
-    fn parse(input: &'a str) -> IResult<&'a str, Self, VerboseError<&'a str>> {
-        let (input, comment) = opt(|i| <CppComment as Parsable>::parse(i)).parse(input)?;
-        let (input, _) = multispace0.parse(input)?;
-        let (input, modifiers) = parse_modifiers(input)?;
-        let (input, _) = multispace0.parse(input)?;
-        let (input, ctype) = parse_cpp_type(input)?;
-        let (input, name) = parse_ws_str(input)?;
-        let (input, _) = multispace0.parse(input)?;
-
-        let (input, default_value) = opt(alt((
-            delimited(
-                char('{'),
-                delimited(multispace0, parse_cpp_type, multispace0),
-                char('}'),
-            ),
-            preceded(
-                char('='),
-                delimited(multispace0, parse_cpp_type, multispace0),
-            ),
-        )))
-            .parse(input)?;
-
-        Ok((
-            input,
-            CppMember {
-                name,
-                ctype,
-                default_value,
-                comment,
-                modifiers,
-            },
-        ))
-    }
-}
-
-fn parse_modifier(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
-    preceded(
-        multispace0,
-        alt((tag("static"), tag("const"), tag("inline"))),
-    )
-    .parse(input)
-}
-
-fn parse_modifiers(input: &str) -> IResult<&str, Vec<CppMemberModifier>, VerboseError<&str>> {
-    many0(map(parse_modifier, |x| CppMemberModifier::from(x))).parse(input)
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::parser::cpp::comment::CppComment;
     use crate::parser::cpp::ctype::CType::Path;
     use crate::parser::cpp::member::{CppMember, CppMemberModifier};
-    use crate::types::Parsable;
+    use crate::parser::generic::member::parse_member;
 
     #[test]
     fn test_cpp_member_without_default_value() {
         let input = "int member";
         assert_eq!(
-            CppMember::parse(input),
+            parse_member::<CppMember, CppComment>(input),
             Ok((
                 "",
                 CppMember {
@@ -123,7 +88,7 @@ mod tests {
         for modifier in vec!["static", "const", "inline"] {
             let input = format!("{} int member", modifier);
             assert_eq!(
-                CppMember::parse(&input[..]),
+                parse_member::<CppMember, CppComment>(&input),
                 Ok((
                     "",
                     CppMember {
@@ -141,7 +106,7 @@ mod tests {
     fn test_cpp_member_with_default_value() {
         for input in ["int member = 0", "int member {0}"] {
             assert_eq!(
-                CppMember::parse(input),
+                parse_member::<CppMember, CppComment>(input),
                 Ok((
                     "",
                     CppMember {

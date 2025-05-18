@@ -1,70 +1,24 @@
-﻿use crate::types::Parsable;
-use nom::branch::alt;
-use nom::bytes::complete::{tag, take_until};
-use nom::character::complete::{line_ending, not_line_ending};
-use nom::combinator::opt;
-use nom::multi::many1;
-use nom::sequence::{delimited, preceded, terminated};
-use nom::{IResult, Parser};
-use nom_language::error::VerboseError;
-
-#[derive(Debug, Eq, PartialEq, Clone)]
+﻿#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct CppComment {
     pub comment: String,
 }
 
-impl<'a> Parsable<'a> for CppComment
-{
-    fn parse(input: &'a str) -> IResult<&'a str, Self, VerboseError<&'a str>> {
-        let (input, lines) =
-            alt((many1(parse_one_line_comment), parse_multiline_comment)).parse(input)?;
-        Ok((
-            input,
-            CppComment {
-                comment: lines.join("\n"),
-            },
-        ))
+impl From<String> for CppComment {
+    fn from(s: String) -> Self {
+        CppComment { comment: s }
     }
-}
-
-fn strip_indent(input: &str) -> &str {
-    // Remove leading whitespace, tab characters before the '*' character
-    input.trim_start_matches(|c: char| c.is_whitespace() || c == '*' || c == '/')
-}
-
-/// Parses comments that starts with // or ///
-fn parse_one_line_comment(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
-    let (input, line) = preceded(
-        alt((tag("///"), tag("//"))),
-        terminated(not_line_ending, opt(line_ending)),
-    )
-    .parse(input)?;
-
-    Ok((input, strip_indent(line)))
-}
-
-fn parse_multiline_comment(input: &str) -> IResult<&str, Vec<&str>, VerboseError<&str>> {
-    let (input, lines) = delimited(tag("/*"), take_until("*/"), tag("*/")).parse(input)?;
-
-    let stripped_content = lines
-        .lines()
-        .map(|line| strip_indent(line))
-        .filter(|line| !line.trim().is_empty())
-        .collect::<Vec<&str>>();
-
-    Ok((input, stripped_content))
 }
 
 #[cfg(test)]
 mod tests {
     use crate::parser::cpp::comment::CppComment;
-    use crate::types::Parsable;
+    use crate::parser::generic::comment::parse_comment;
 
     #[test]
     fn test_parse_one_line_comment() {
         let input = "// This is a one line comment";
 
-        let (input, comment) = CppComment::parse(input).unwrap();
+        let (input, comment) = parse_comment::<CppComment>(input).unwrap();
         assert!(input.is_empty());
         assert_eq!(
             comment,
@@ -78,7 +32,7 @@ mod tests {
     fn test_parse_one_line_comment_with_multiline_syntax() {
         let input = "/* This is a one line comment */";
 
-        let (input, comment) = CppComment::parse(input).unwrap();
+        let (input, comment) = parse_comment::<CppComment>(input).unwrap();
         assert!(input.is_empty());
         assert_eq!(
             comment,
@@ -94,7 +48,7 @@ mod tests {
                              * This is a one line comment
                              */"#;
 
-        let (input, comment) = CppComment::parse(input).unwrap();
+        let (input, comment) = parse_comment::<CppComment>(input).unwrap();
         assert!(input.is_empty());
         assert_eq!(
             comment,
@@ -108,7 +62,7 @@ mod tests {
     fn test_parse_multiple_lines_comment() {
         let input = "// This is a one line comment\n// And another line";
 
-        let (input, comment) = CppComment::parse(input).unwrap();
+        let (input, comment) = parse_comment::<CppComment>(input).unwrap();
         assert!(input.is_empty());
         assert_eq!(
             comment,

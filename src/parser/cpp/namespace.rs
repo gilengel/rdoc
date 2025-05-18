@@ -1,11 +1,9 @@
 ﻿use crate::parser::cpp::class::CppClass;
-use crate::parser::cpp::method::CppFunction;
-use nom::IResult;
-use nom::bytes::complete::tag;
-use nom::character::complete::{char, multispace0};
 use crate::parser::cpp::comment::CppComment;
-use crate::parser::parse_ws_str;
-use crate::types::Parsable;
+use crate::parser::cpp::member::CppMember;
+use crate::parser::cpp::method::CppFunction;
+
+use crate::parser::generic::namespace::Namespace;
 
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct CppNamespace<'a> {
@@ -13,63 +11,39 @@ pub struct CppNamespace<'a> {
     pub namespaces: Vec<CppNamespace<'a>>,
     pub classes: Vec<CppClass<'a>>,
     pub functions: Vec<CppFunction<'a>>,
+    pub variables: Vec<CppMember<'a>>,
+    pub comments: Vec<CppComment>
 }
 
-fn parse_inner_namespace(input: &str) -> IResult<&str, CppNamespace> {
-    let (input, _) = tag("namespace")(input)?;
-    let (input, name) = parse_ws_str(input)?;
-    let (input, _) = char('{')(input)?;
-
-    let mut input = input;
-
-    let mut namespace = CppNamespace {
-        name,
-        ..Default::default()
-    };
-
-    loop {
-        let (i, _) = multispace0(input)?;
-        input = i;
-
-        if let Ok((i, inner_namespace)) = parse_inner_namespace(input) {
-            namespace.namespaces.push(inner_namespace);
-
-            input = i;
-            continue;
+impl<'a> Namespace<'a, CppClass<'a>, CppMember<'a>, CppFunction<'a>, CppComment>
+    for CppNamespace<'a>
+{
+    fn namespace(
+        name: &'a str,
+        namespaces: Vec<Self>,
+        functions: Vec<CppFunction<'a>>,
+        variables: Vec<CppMember<'a>>,
+        classes: Vec<CppClass<'a>>,
+        comments: Vec<CppComment>
+    ) -> Self
+    where
+        Self: 'a + Sized,
+    {
+        CppNamespace {
+            name,
+            namespaces,
+            classes,
+            functions,
+            variables,
+            comments
         }
-
-
-        if let Ok((i, _)) = <CppComment as Parsable>::parse(input) {
-            input = i;
-            continue;
-        }
-
-        if let Ok((i, class)) = <CppClass as Parsable>::parse(input) {
-            namespace.classes.push(class);
-
-            input = i;
-            continue;
-        }
-
-        if let Ok((i, _)) = char::<_, nom::error::Error<&str>>('}')(input) {
-            return Ok((i, namespace));
-        }
-
-        return Err(nom::Err::Error(nom::error::make_error(
-            input,
-            nom::error::ErrorKind::Tag,
-        )));
     }
 }
-
-pub fn parse_cpp_namespace(input: &str) -> IResult<&str, CppNamespace> {
-    parse_inner_namespace(input)
-}
-
 #[cfg(test)]
 mod tests {
     use crate::parser::cpp::class::CppClass;
-    use crate::parser::cpp::namespace::{CppNamespace, parse_cpp_namespace};
+    use crate::parser::cpp::namespace::CppNamespace;
+    use crate::parser::generic::namespace::parse_namespace;
 
     #[test]
     fn empty_namespace() {
@@ -82,7 +56,7 @@ mod tests {
             },
         ));
 
-        let result = parse_cpp_namespace(input);
+        let result = parse_namespace(input);
         assert_eq!(result, expected);
     }
 
@@ -101,7 +75,7 @@ mod tests {
             },
         ));
 
-        let result = parse_cpp_namespace(input);
+        let result = parse_namespace(input);
         assert_eq!(result, expected);
     }
     #[test]
@@ -118,7 +92,7 @@ mod tests {
             },
         ));
 
-        let result = parse_cpp_namespace(input);
+        let result = parse_namespace(input);
         assert_eq!(result, expected);
     }
 
@@ -140,7 +114,7 @@ mod tests {
             },
         ));
 
-        let result = parse_cpp_namespace(input);
+        let result = parse_namespace(input);
         assert_eq!(result, expected);
     }
 
@@ -162,7 +136,7 @@ mod tests {
             },
         ));
 
-        let result = parse_cpp_namespace(input);
+        let result = parse_namespace(input);
         assert_eq!(result, expected);
     }
 }

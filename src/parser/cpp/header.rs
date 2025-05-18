@@ -1,9 +1,9 @@
 ﻿use crate::parser::cpp::alias::CppAlias;
 use crate::parser::cpp::class::CppClass;
 use crate::parser::cpp::member::CppMember;
-use crate::parser::cpp::method::CppFunction;
+use crate::parser::cpp::method::{CppFunction, parse_method};
 use crate::parser::cpp::namespace::CppNamespace;
-use crate::parser::ws;
+use crate::parser::generic::member::parse_member;
 use crate::types::Parsable;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_till};
@@ -14,6 +14,7 @@ use nom::multi::fold_many0;
 use nom::sequence::{delimited, preceded, terminated};
 use nom::{IResult, Parser};
 use nom_language::error::VerboseError;
+use crate::parser::generic::class::parse_class;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct CppHeader<'a> {
@@ -87,12 +88,12 @@ fn parse_header_item(input: &str) -> IResult<&str, CppHeaderItem, VerboseError<&
             map(parse_include, |include| CppHeaderItem::Include(include)),
             map(parse_define, |define| CppHeaderItem::Define(define)),
             map(<CppAlias as Parsable>::parse, CppHeaderItem::Alias),
-            map(<CppClass as Parsable>::parse, CppHeaderItem::Class),
+            map(parse_class, CppHeaderItem::Class),
             map(
-                terminated(<CppMember as Parsable>::parse, char(';')),
+                terminated(parse_member, char(';')),
                 CppHeaderItem::Declaration,
             ),
-            map(<CppFunction as Parsable>::parse, CppHeaderItem::Function),
+            map(parse_method, CppHeaderItem::Function),
             map(tag("\n"), |_| CppHeaderItem::Ignore),
         )),
     )
@@ -122,23 +123,19 @@ pub fn parse_include(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
     Ok((input, file))
 }
 
-pub fn parse_uclass(input: &str) -> IResult<&str, &str> {
-    let (input, _) = (ws(tag("UCLASS")), take_until("\n")).parse(input)?;
-
-    Ok((input, ""))
-}
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::cpp::class::{CppClass, CppParentClass, InheritanceVisibility};
+    use crate::parser::cpp::class::CppClass;
     use crate::parser::cpp::comment::CppComment;
     use crate::parser::cpp::ctype::CType;
     use crate::parser::cpp::header::{CppHeader, parse_include, parse_pragma};
     use crate::parser::cpp::member::CppMember;
+    use crate::parser::cpp::member::CppMemberModifier::{Const, Static};
     use crate::parser::cpp::method::{CppFunction, CppFunctionInheritance};
     use crate::types::Parsable;
     use std::collections::HashMap;
-    use crate::parser::cpp::member::CppMemberModifier::{Const, Static};
+    use crate::parser::generic::class::{CppParentClass, InheritanceVisibility};
 
     #[test]
     fn test_relative_include() {
@@ -197,8 +194,6 @@ mod tests {
                                 visibility: InheritanceVisibility::Public
                             }],
                             methods: HashMap::from([
-                                (InheritanceVisibility::Private, vec![]),
-                                (InheritanceVisibility::Protected, vec![]),
                                 (
                                     InheritanceVisibility::Public,
                                     vec![

@@ -5,7 +5,7 @@ mod comment;
 pub mod member;
 pub mod header;
 pub mod namespace;
-mod template;
+pub(crate) mod template;
 mod variable;
 pub mod cenum;
 mod alias;

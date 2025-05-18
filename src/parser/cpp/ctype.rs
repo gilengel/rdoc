@@ -36,16 +36,6 @@ fn identifier(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
     take_while1(is_ident_char)(input)
 }
 
-fn path(input: &str) -> IResult<&str, CType, VerboseError<&str>> {
-    map(separated_list0(tag("::"), identifier), |x| {
-        match x.len() == 1 && x[0] == "auto" {
-            true => CType::Auto,
-            false => CType::Path(x),
-        }
-    })
-    .parse(input)
-}
-
 fn parse_generics<'a>(
     input: &'a str,
     ty: CType<'a>,

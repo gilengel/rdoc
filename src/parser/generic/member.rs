@@ -12,12 +12,6 @@ use nom::sequence::{delimited, preceded};
 use nom::{IResult, Parser};
 use nom_language::error::VerboseError;
 
-pub enum MemberModifier {
-    Static,
-    Const,
-    Inline,
-}
-
 pub trait Member<'a, AnnotationType, CommentType> {
     fn member(
         name: &'a str,

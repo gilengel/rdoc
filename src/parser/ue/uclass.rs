@@ -94,8 +94,8 @@ mod tests {
     use crate::parser::cpp::comment::CppComment;
     use crate::parser::cpp::ctype::CType;
     use crate::parser::cpp::method::{CppFunction, CppFunctionInheritance, CppMethodParam};
-    use crate::parser::generic::class::InheritanceVisibility::{Private, Protected, Public};
-    use crate::parser::generic::class::{CppParentClass, InheritanceVisibility, parse_class};
+    use crate::parser::generic::class::InheritanceVisibility::{Protected, Public};
+    use crate::parser::generic::class::{CppParentClass, parse_class};
     use crate::parser::ue::uclass::{UClass, UClassAnnotation};
     use crate::parser::ue::ufunction::{UFunction, UFunctionAnnotation};
     use nom::{IResult, Parser};
@@ -136,10 +136,10 @@ protected:
                             template_params: vec![],
                             params: vec![CppMethodParam {
                                 name: Some("ObjectInitializer"),
-                                ctype: CType::Reference(Box::new(CType::Path(vec![
+                                ctype: CType::Const(Box::from(CType::Reference(Box::from(CType::Path(vec![
                                     "FObjectInitializer",
-                                ]))),
-                                is_const: true,
+                                ]))))),
+                                default_value: None
                             }],
                             inheritance_modifiers: vec![],
                             is_const: false,

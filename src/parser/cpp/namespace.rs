@@ -51,6 +51,7 @@ impl<'a>
 #[cfg(test)]
 mod tests {
     use crate::parser::cpp::class::CppClass;
+    use crate::parser::cpp::comment::CppComment;
     use crate::parser::cpp::namespace::CppNamespace;
     use crate::parser::generic::namespace::parse_namespace;
 
@@ -97,6 +98,7 @@ mod tests {
             "",
             CppNamespace {
                 name: "test",
+                comments: vec![CppComment { comment: "some comment".into() }],
                 ..Default::default()
             },
         ));

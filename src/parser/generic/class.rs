@@ -108,7 +108,7 @@ where
             CommentType,
         > + 'a,
 {
-    let (input, comment) = opt(parse_comment::<CommentType>).parse(input)?;
+    let (input, _) = opt(parse_comment::<CommentType>).parse(input)?;
     let (input, annotations) = opt(many0(|i| ClassAnnotationType::parse(i))).parse(input)?;
 
     let (input, _) = opt(parse_template).parse(input)?;

@@ -20,7 +20,7 @@ pub enum CType<'a> {
     Pointer(Box<CType<'a>>),
     Reference(Box<CType<'a>>),
     MemberAccess(Box<CType<'a>>, &'a str),
-    Const(Box<CType<'a>>), // <- NEW!
+    Const(Box<CType<'a>>),
 }
 
 impl Default for CType<'static> {

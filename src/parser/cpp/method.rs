@@ -3,13 +3,14 @@ use crate::parser::cpp::ctype::{CType, parse_cpp_type};
 use crate::parser::generic::annotation::NoAnnotation;
 
 use crate::parser::generic::method::Method;
-use crate::parser::parse_ws_str;
+use crate::parser::{parse_str, parse_ws_str, ws};
 use nom::branch::alt;
 use nom::bytes::complete::take_till1;
+use nom::bytes::escaped;
 use nom::character::complete::{char, multispace0, none_of};
 use nom::combinator::{map, opt, peek, recognize};
 use nom::multi::{many0, separated_list0};
-use nom::sequence::{delimited, preceded};
+use nom::sequence::{delimited, preceded, terminated};
 use nom::{IResult, Parser};
 use nom_language::error::VerboseError;
 
@@ -91,14 +92,52 @@ pub struct CppMethodParam<'a> {
     pub default_value: Option<CType<'a>>,
 }
 
-fn parse_cpp_method_param(input: &str) -> IResult<&str, CppMethodParam, VerboseError<&str>> {
+fn parse_function_pointer_param(input: &str) -> IResult<&str, CppMethodParam, VerboseError<&str>> {
+    let (input, return_type) = ws(parse_cpp_type).parse(input)?;
+    let (input, _) = (multispace0, char('(')).parse(input)?;
+    let (input, _) = (multispace0, char('*'), multispace0).parse(input)?;
+    let (input, name) = terminated(parse_str, (multispace0, char(')'))).parse(input)?;
+
+    let (input, params) = delimited(
+        char('('),
+        separated_list0(char(','), ws(parse_cpp_type)),
+        char(')'),
+    )
+    .parse(input)?;
+
+    Ok((
+        input,
+        CppMethodParam {
+            name: None,
+            ctype: CType::Function(Box::from(return_type), params),
+            default_value: None,
+        },
+    ))
+}
+
+fn parse_simple_param(input: &str) -> IResult<&str, CppMethodParam, VerboseError<&str>> {
     let (input, _) = multispace0(input)?;
     let (input, ctype) = parse_cpp_type(input)?;
     let (input, name) = opt(parse_ws_str).parse(input)?;
 
-    let (input, default_value) = opt(preceded((multispace0, char('='), multispace0), parse_cpp_type)).parse(input)?;
+    let (input, default_value) = opt(preceded(
+        (multispace0, char('='), multispace0),
+        parse_cpp_type,
+    ))
+    .parse(input)?;
 
-    Ok((input, CppMethodParam { name, ctype, default_value }))
+    Ok((
+        input,
+        CppMethodParam {
+            name,
+            ctype,
+            default_value,
+        },
+    ))
+}
+
+fn parse_cpp_method_param(input: &str) -> IResult<&str, CppMethodParam, VerboseError<&str>> {
+    alt((parse_function_pointer_param, parse_simple_param)).parse(input)
 }
 
 pub fn parse_method_params(input: &str) -> IResult<&str, Vec<CppMethodParam>, VerboseError<&str>> {
@@ -142,6 +181,7 @@ pub fn parse_brace_block(input: &str) -> IResult<&str, &str, VerboseError<&str>>
 #[cfg(test)]
 mod tests {
     use crate::parser::cpp::comment::CppComment;
+    use crate::parser::cpp::ctype::CType;
     use crate::parser::cpp::ctype::CType::{Const, Function, Generic, Path, Pointer, Reference};
     use crate::parser::cpp::method::CppFunctionInheritance::{Final, Static, Virtual};
     use crate::parser::cpp::method::{
@@ -205,6 +245,59 @@ mod tests {
                         name: Some("i"),
                         ctype: Const(Box::from(Path(vec!["int"]))),
                         default_value: Some(Path(vec!["0"])),
+                    }],
+                    ..Default::default()
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_method_with_c_function_param() {
+        let input = "void method(int (*f)(int, int))";
+        let result = parse_method(input);
+
+        assert_eq!(
+            result,
+            Ok((
+                "",
+                CppFunction {
+                    name: "method",
+                    params: vec![CppMethodParam {
+                        name: None,
+                        ctype: CType::Function(
+                            Box::from(CType::Path(vec!["int"])),
+                            vec![CType::Path(vec!["int"]), CType::Path(vec!["int"])]
+                        ),
+                        default_value: None,
+                    }],
+                    ..Default::default()
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn test_method_with_std_function_param() {
+        let input = "void method(const std::function<int(int, int)>& f)";
+        let result = parse_method(input);
+
+        assert_eq!(
+            result,
+            Ok((
+                "",
+                CppFunction {
+                    name: "method",
+                    params: vec![CppMethodParam {
+                        name: Some("f"),
+                        ctype: Reference(Box::from(Const(Box::from(Generic(
+                            Box::from(Path(vec!["std", "function"])),
+                            vec![CType::Function(
+                                Box::from(CType::Path(vec!["int"])),
+                                vec![CType::Path(vec!["int"]), CType::Path(vec!["int"])]
+                            )]
+                        ))))),
+                        default_value: None,
                     }],
                     ..Default::default()
                 }

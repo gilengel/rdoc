@@ -2,8 +2,8 @@
 use crate::parser::cpp::ctype::CType;
 use crate::parser::generic::annotation::Annotation;
 
-use crate::parser::cpp::method::{CppFunction, CppFunctionInheritance, CppMethodParam};
-use crate::parser::generic::method::Method;
+use crate::parser::cpp::method::{CppFunction, CppMethodParam};
+use crate::parser::generic::method::{CppStorageQualifier, Method, PostParamQualifier, SpecialMember};
 use nom::bytes::complete::{tag, take_till};
 use nom::sequence::preceded;
 use nom::{IResult, Parser};
@@ -34,14 +34,14 @@ impl<'a> Method<'a, UFunctionAnnotation<'a>, CppComment> for UFunction<'a> {
         return_type: Option<CType<'a>>,
         template_params: Vec<CType<'a>>,
         params: Vec<CppMethodParam<'a>>,
-        inheritance_modifiers: Vec<CppFunctionInheritance>,
-        is_const: bool,
-        is_interface: bool,
+        storage_qualifiers: Vec<CppStorageQualifier>,
+        post_param_qualifiers: Vec<PostParamQualifier>,
+        special: Option<SpecialMember>,
         comment: Option<CppComment>,
         annotations: Vec<UFunctionAnnotation<'a>>,
     ) -> Self
     where
-        UFunctionAnnotation<'a>: Annotation<'a>,
+        UFunctionAnnotation<'a>: Annotation<'a> + 'a,
         CppComment: From<String>,
         Self: 'a,
     {
@@ -52,9 +52,9 @@ impl<'a> Method<'a, UFunctionAnnotation<'a>, CppComment> for UFunction<'a> {
                                           return_type,
                                           template_params,
                                           params,
-                                          inheritance_modifiers,
-                                          is_const,
-                                          is_interface,
+                                          storage_qualifiers,
+                                          post_param_qualifiers,
+                                          special,
                                           comment,
                                           vec![]),
             annotation

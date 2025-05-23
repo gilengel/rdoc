@@ -1,5 +1,4 @@
 ﻿use crate::parser::cpp::comment::CppComment;
-use crate::parser::cpp::ctype::CType::Path;
 use crate::parser::cpp::member::CppMember;
 use crate::parser::cpp::method::CppFunction;
 
@@ -7,6 +6,7 @@ use crate::parser::generic::class::{Class, CppParentClass, InheritanceVisibility
 
 use crate::parser::generic::annotation::NoAnnotation;
 use std::collections::HashMap;
+use crate::parser::cpp::ctype::CType::Path;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct CppClass<'a> {

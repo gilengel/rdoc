@@ -2,11 +2,12 @@
 use crate::parser::cpp::ctype::{CType, parse_cpp_type};
 use crate::parser::generic::annotation::NoAnnotation;
 
-use crate::parser::generic::method::Method;
+use crate::parser::generic::method::{
+    CppStorageQualifier, Method, PostParamQualifier, SpecialMember,
+};
 use crate::parser::{parse_str, parse_ws_str, ws};
 use nom::branch::alt;
 use nom::bytes::complete::take_till1;
-use nom::bytes::escaped;
 use nom::character::complete::{char, multispace0, none_of};
 use nom::combinator::{map, opt, peek, recognize};
 use nom::multi::{many0, separated_list0};
@@ -15,33 +16,14 @@ use nom::{IResult, Parser};
 use nom_language::error::VerboseError;
 
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum CppFunctionInheritance {
-    Static,
-    Virtual,
-    Override,
-    Final,
-}
-
-impl From<&str> for CppFunctionInheritance {
-    fn from(input: &str) -> Self {
-        match input {
-            "static" => CppFunctionInheritance::Static,
-            "virtual" => CppFunctionInheritance::Virtual,
-            "override" => CppFunctionInheritance::Override,
-            "final" => CppFunctionInheritance::Final,
-            _ => unimplemented!(),
-        }
-    }
-}
-#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct CppFunction<'a> {
     pub name: &'a str,
     pub return_type: Option<CType<'a>>,
     pub template_params: Vec<CType<'a>>,
     pub params: Vec<CppMethodParam<'a>>,
-    pub inheritance_modifiers: Vec<CppFunctionInheritance>,
-    pub is_const: bool,
-    pub is_interface: bool,
+    pub storage_qualifiers: Vec<CppStorageQualifier>,
+    pub post_param_qualifiers: Vec<PostParamQualifier>,
+    pub special: Option<SpecialMember>,
     pub comment: Option<CppComment>,
 }
 
@@ -51,20 +33,20 @@ impl<'a> Method<'a, NoAnnotation, CppComment> for CppFunction<'a> {
         return_type: Option<CType<'a>>,
         template_params: Vec<CType<'a>>,
         params: Vec<CppMethodParam<'a>>,
-        inheritance_modifiers: Vec<CppFunctionInheritance>,
-        is_const: bool,
-        is_interface: bool,
+        storage_qualifiers: Vec<CppStorageQualifier>,
+        post_param_qualifiers: Vec<PostParamQualifier>,
+        special: Option<SpecialMember>,
         comment: Option<CppComment>,
-        _annotations: Vec<NoAnnotation>,
+        _: Vec<NoAnnotation>,
     ) -> Self {
         CppFunction {
             name,
             return_type,
             template_params,
             params,
-            inheritance_modifiers,
-            is_const,
-            is_interface,
+            storage_qualifiers,
+            post_param_qualifiers,
+            special,
             comment,
         }
     }
@@ -77,9 +59,9 @@ impl<'a> Default for CppFunction<'a> {
             return_type: None,
             template_params: vec![],
             params: vec![],
-            inheritance_modifiers: vec![],
-            is_const: false,
-            is_interface: false,
+            storage_qualifiers: vec![],
+            post_param_qualifiers: vec![],
+            special: None,
             comment: None,
         }
     }
@@ -96,7 +78,7 @@ fn parse_function_pointer_param(input: &str) -> IResult<&str, CppMethodParam, Ve
     let (input, return_type) = ws(parse_cpp_type).parse(input)?;
     let (input, _) = (multispace0, char('(')).parse(input)?;
     let (input, _) = (multispace0, char('*'), multispace0).parse(input)?;
-    let (input, name) = terminated(parse_str, (multispace0, char(')'))).parse(input)?;
+    let (input, _) = terminated(parse_str, (multispace0, char(')'))).parse(input)?;
 
     let (input, params) = delimited(
         char('('),
@@ -183,11 +165,10 @@ mod tests {
     use crate::parser::cpp::comment::CppComment;
     use crate::parser::cpp::ctype::CType;
     use crate::parser::cpp::ctype::CType::{Const, Function, Generic, Path, Pointer, Reference};
-    use crate::parser::cpp::method::CppFunctionInheritance::{Final, Static, Virtual};
-    use crate::parser::cpp::method::{
-        CppFunction, CppFunctionInheritance, CppMethodParam, parse_brace_block,
-    };
-    use crate::parser::generic::method::parse_method;
+    use crate::parser::cpp::method::{CppFunction, CppMethodParam, parse_brace_block};
+    use crate::parser::generic::method::CppStorageQualifier::Virtual;
+    use crate::parser::generic::method::PostParamQualifier::Final;
+    use crate::parser::generic::method::{PostParamQualifier, SpecialMember, parse_method};
 
     #[test]
     fn test_empty_braces() {
@@ -316,7 +297,7 @@ mod tests {
                 "",
                 CppFunction {
                     name: "method",
-                    is_interface: true,
+                    special: Some(SpecialMember::PureVirtual),
                     ..Default::default()
                 }
             ))
@@ -414,13 +395,8 @@ mod tests {
 
     #[test]
     fn test_method_with_virtual_modifier() {
-        for inheritance_modifier in ["", "virtual", "static"] {
-            let input = format!("{} void method()", inheritance_modifier);
-            let inheritance_modifiers = match inheritance_modifier {
-                "virtual" => vec![Virtual],
-                "static" => vec![Static],
-                _ => vec![],
-            };
+        for storage_qualifier in ["virtual", "static"] {
+            let input = format!("{} void method()", storage_qualifier);
 
             let result = parse_method(&input);
 
@@ -430,7 +406,7 @@ mod tests {
                     "",
                     CppFunction {
                         name: "method",
-                        inheritance_modifiers,
+                        storage_qualifiers: vec![storage_qualifier.into()],
                         ..Default::default()
                     }
                 ))
@@ -440,8 +416,8 @@ mod tests {
 
     #[test]
     fn test_method_with_inheritance_modifier() {
-        for inheritance_modifier in ["override", "final"] {
-            let input = format!("virtual void method() {}", inheritance_modifier);
+        for post_param_qualifier in ["override", "final"] {
+            let input = format!("virtual void method() {}", post_param_qualifier);
             let result = parse_method(&input);
 
             assert_eq!(
@@ -450,10 +426,8 @@ mod tests {
                     "",
                     CppFunction {
                         name: "method",
-                        inheritance_modifiers: vec![
-                            Virtual,
-                            CppFunctionInheritance::from(inheritance_modifier)
-                        ],
+                        storage_qualifiers: vec![Virtual],
+                        post_param_qualifiers: vec![post_param_qualifier.into()],
                         ..Default::default()
                     }
                 ))
@@ -477,7 +451,7 @@ mod tests {
                         ctype: Path(vec!["int"]),
                         default_value: None
                     }],
-                    inheritance_modifiers: vec![Final],
+                    post_param_qualifiers: vec![Final],
                     ..Default::default()
                 }
             ))
@@ -521,7 +495,7 @@ mod tests {
                         ctype: Reference(Box::from(Path(vec!["int"]))),
                         default_value: None
                     }],
-                    inheritance_modifiers: vec![Final],
+                    post_param_qualifiers: vec![Final],
                     ..Default::default()
                 }
             ))
@@ -541,10 +515,10 @@ mod tests {
                     name: "method",
                     params: vec![CppMethodParam {
                         name: Some("a"),
-                        ctype: Const(Box::from(Reference(Box::from(Path(vec!["int"]))))),
+                        ctype: Reference(Box::from(Const(Box::from(Path(vec!["int"]))))),
                         default_value: None
                     }],
-                    inheritance_modifiers: vec![Final],
+                    post_param_qualifiers: vec![Final],
                     ..Default::default()
                 }
             ))
@@ -567,7 +541,7 @@ mod tests {
                         ctype: Pointer(Box::from(Path(vec!["int"]))),
                         default_value: None
                     }],
-                    inheritance_modifiers: vec![Final],
+                    post_param_qualifiers: vec![Final],
                     ..Default::default()
                 }
             ))
@@ -597,7 +571,7 @@ mod tests {
                             default_value: None
                         }
                     ],
-                    inheritance_modifiers: vec![Final],
+                    post_param_qualifiers: vec![Final],
                     ..Default::default()
                 }
             ))
@@ -620,7 +594,7 @@ mod tests {
                         ctype: Generic(Box::from(Path(vec!["TArray"])), vec![Path(vec!["int32"])]),
                         default_value: None
                     }],
-                    inheritance_modifiers: vec![Final],
+                    post_param_qualifiers: vec![Final],
                     ..Default::default()
                 }
             ))
@@ -638,7 +612,7 @@ mod tests {
                 "",
                 CppFunction {
                     name: "method",
-                    is_const: true,
+                    post_param_qualifiers: vec![PostParamQualifier::Const],
                     ..Default::default()
                 }
             ))
@@ -662,7 +636,7 @@ mod tests {
                         ctype: Pointer(Box::from(Path(vec!["int"]))),
                         default_value: None
                     }],
-                    inheritance_modifiers: vec![Final],
+                    post_param_qualifiers: vec![Final],
                     ..Default::default()
                 }
             ))
@@ -709,6 +683,7 @@ mod tests {
                 "",
                 CppFunction {
                     name: "method",
+                    template_params: vec![Path(vec!["T"])],
                     return_type: Some(Path(vec!["T"])),
                     ..Default::default()
                 }
@@ -728,6 +703,8 @@ mod tests {
                 CppFunction {
                     name: "method",
                     return_type: None,
+                    template_params: vec![Path(vec!["Integer"]), Path(vec![])],
+
                     params: vec![CppMethodParam {
                         name: Some("a"),
                         ctype: Path(vec!["Integer"]),
@@ -789,6 +766,7 @@ mod tests {
                 "",
                 CppFunction {
                     name: "method",
+                    template_params: vec![Path(vec!["T"]), Path(vec!["S"])],
                     return_type: Some(Path(vec!["T"])),
                     ..Default::default()
                 }

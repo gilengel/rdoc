@@ -78,7 +78,13 @@ fn parse_function<'a>(
         preceded(multispace0, char('(')),
         separated_list0(
             preceded(multispace0, char(',')),
-            preceded(multispace0, parse_cpp_type),
+            map(
+                (
+                    preceded(multispace0, parse_cpp_type),
+                    opt(preceded(multispace0, take_while1(is_ident_char))),
+                ),
+                |(ty, _)| ty,
+            ),
         ),
         preceded(multispace0, char(')')),
     ))
@@ -138,7 +144,8 @@ fn cpp_ident(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
     preceded(
         opt(preceded(multispace0, alt((tag("class"), tag("typename"))))),
         preceded(multispace0, identifier),
-    ).parse(input)
+    )
+    .parse(input)
 }
 fn parse_type_atom_inner(input: &str) -> IResult<&str, CType, VerboseError<&str>> {
     map(separated_list0(tag("::"), cpp_ident), |segments| {
@@ -147,7 +154,8 @@ fn parse_type_atom_inner(input: &str) -> IResult<&str, CType, VerboseError<&str>
         } else {
             CType::Path(segments)
         }
-    }).parse(input)
+    })
+    .parse(input)
 }
 
 fn parse_type_atom(input: &str) -> IResult<&str, CType, VerboseError<&str>> {
@@ -190,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn test_const(){
+    fn test_const() {
         assert_eq!(
             parse_cpp_type("const int&"),
             Ok((
@@ -203,12 +211,10 @@ mod tests {
             parse_cpp_type("const std::vector<int>*"),
             Ok((
                 "",
-                CType::Pointer(Box::new(CType::Const(Box::new(
-                    CType::Generic(
-                        Box::new(CType::Path(vec!["std", "vector"])),
-                        vec![CType::Path(vec!["int"])]
-                    )
-                )))),
+                CType::Pointer(Box::new(CType::Const(Box::new(CType::Generic(
+                    Box::new(CType::Path(vec!["std", "vector"])),
+                    vec![CType::Path(vec!["int"])]
+                ))))),
             ))
         );
     }

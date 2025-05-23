@@ -93,17 +93,19 @@ where
 mod tests {
     use crate::parser::cpp::comment::CppComment;
     use crate::parser::cpp::ctype::CType;
-    use crate::parser::cpp::method::{CppFunction, CppFunctionInheritance, CppMethodParam};
+    use crate::parser::cpp::method::{CppFunction, CppMethodParam};
     use crate::parser::generic::class::InheritanceVisibility::{Protected, Public};
     use crate::parser::generic::class::{CppParentClass, parse_class};
+    use crate::parser::generic::method::CppStorageQualifier::Virtual;
+    use crate::parser::generic::method::PostParamQualifier::Override;
     use crate::parser::ue::uclass::{UClass, UClassAnnotation};
     use crate::parser::ue::ufunction::{UFunction, UFunctionAnnotation};
-    use nom::{IResult, Parser};
-    use nom::sequence::preceded;
-    use nom_language::error::VerboseError;
-    use std::collections::HashMap;
     use nom::bytes::complete::tag;
     use nom::character::complete::multispace0;
+    use nom::sequence::preceded;
+    use nom::{IResult, Parser};
+    use nom_language::error::VerboseError;
+    use std::collections::HashMap;
 
     #[test]
     fn test_parse_empty_cpp_with_inheritance_class() {
@@ -132,22 +134,18 @@ protected:
                     vec![UFunction {
                         function: CppFunction {
                             name: "AClass",
-                            return_type: None,
-                            template_params: vec![],
                             params: vec![CppMethodParam {
                                 name: Some("ObjectInitializer"),
-                                ctype: CType::Const(Box::from(CType::Reference(Box::from(CType::Path(vec![
-                                    "FObjectInitializer",
-                                ]))))),
-                                default_value: None
+                                ctype: CType::Const(Box::from(CType::Reference(Box::from(
+                                    CType::Path(vec!["FObjectInitializer"]),
+                                )))),
+                                default_value: None,
                             }],
-                            inheritance_modifiers: vec![],
-                            is_const: false,
-                            is_interface: false,
                             comment: Some(CppComment {
                                 comment: "Sets default values for this character's properties"
                                     .to_string(),
                             }),
+                            ..Default::default()
                         },
                         annotation: UFunctionAnnotation(vec![]),
                     }],
@@ -157,18 +155,12 @@ protected:
                     vec![UFunction {
                         function: CppFunction {
                             name: "BeginPlay",
-                            return_type: None,
-                            template_params: vec![],
-                            params: vec![],
-                            inheritance_modifiers: vec![
-                                CppFunctionInheritance::Virtual,
-                                CppFunctionInheritance::Override,
-                            ],
-                            is_const: false,
-                            is_interface: false,
+                            storage_qualifiers: vec![Virtual],
+                            post_param_qualifiers: vec![Override],
                             comment: Some(CppComment {
                                 comment: "Called when the game starts or when spawned".to_string(),
                             }),
+                            ..Default::default()
                         },
                         annotation: UFunctionAnnotation(vec![]),
                     }],

@@ -4,9 +4,9 @@ use crate::parser::cpp::method::CppFunction;
 
 use crate::parser::generic::class::{Class, CppParentClass, InheritanceVisibility, parse_class};
 
+use crate::parser::cpp::ctype::CType::Path;
 use crate::parser::generic::annotation::NoAnnotation;
 use std::collections::HashMap;
-use crate::parser::cpp::ctype::CType::Path;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct CppClass<'a> {
@@ -31,21 +31,24 @@ impl Default for CppClass<'_> {
     }
 }
 
-impl<'a>
-    Class<'a, NoAnnotation, CppFunction<'a>, NoAnnotation, CppMember<'a>, NoAnnotation, CppComment>
-    for CppClass<'a>
-{
+impl<'a> Class<'a> for CppClass<'a> {
+    type ClassAnnotation = NoAnnotation;
+    type MemberAnnotation = NoAnnotation;
+    type Comment = CppComment;
+    type Method = CppFunction<'a>;
+    type Member = CppMember<'a>;
+
     fn class(
         name: &'a str,
         api: Option<&'a str>,
         parents: Vec<CppParentClass<'a>>,
-        methods: HashMap<InheritanceVisibility, Vec<CppFunction<'a>>>,
-        members: HashMap<InheritanceVisibility, Vec<CppMember<'a>>>,
-        inner_classes: HashMap<InheritanceVisibility, Vec<CppClass<'a>>>,
-        _annotation: Option<Vec<NoAnnotation>>,
+        methods: HashMap<InheritanceVisibility, Vec<Self::Method>>,
+        members: HashMap<InheritanceVisibility, Vec<Self::Member>>,
+        inner_classes: HashMap<InheritanceVisibility, Vec<Self>>,
+        _: Option<Vec<Self::ClassAnnotation>>,
     ) -> Self
     where
-        Self: 'a,
+        Self: 'a + Sized,
     {
         Self {
             name,
@@ -61,10 +64,12 @@ impl<'a>
 #[cfg(test)]
 mod tests {
     use crate::parser::cpp::class::{CppClass, CppParentClass, InheritanceVisibility};
-
     use crate::parser::cpp::ctype::CType::Path;
     use crate::parser::cpp::method::CppFunction;
     use crate::parser::generic::class::parse_class;
+    use nom::Err::Error;
+    use nom_language::error::VerboseError;
+    use nom_language::error::VerboseErrorKind::Char;
     use rand::Rng;
     use std::collections::HashMap;
 
@@ -79,6 +84,23 @@ mod tests {
         let len = rng.random_range(1..=40);
         "\n".repeat(len)
     }
+
+    #[test]
+    fn test_fails_for_invalid_struct() {
+        let input = r#"struct {
+            void hello(){};
+            void invalid({};
+        }"#;
+        let result = parse_class::<CppClass>(input, &vec![]);
+
+        assert_eq!(
+            result,
+            Err(Error(VerboseError {
+                errors: vec![("#INVALID) = 0", Char(')'))]
+            }))
+        );
+    }
+
 
     #[test]
     fn test_parse_empty_cpp_with_inheritance_class() {

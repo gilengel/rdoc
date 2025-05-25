@@ -12,30 +12,28 @@ use nom::sequence::{delimited, preceded};
 use nom::{IResult, Parser};
 use nom_language::error::VerboseError;
 
-pub trait Member<'a, AnnotationType, CommentType> {
+pub trait Member<'a> {
+    type Annotation: Annotation<'a> + 'a;
+    type Comment: From<String>;
+
     fn member(
         name: &'a str,
         ctype: CType<'a>,
         default_value: Option<CType<'a>>,
-        comment: Option<CommentType>,
+        comment: Option<Self::Comment>,
         modifiers: Vec<CppMemberModifier>,
-        annotations: Vec<AnnotationType>,
-    ) -> Self
-    where
-        AnnotationType: Annotation<'a>,
-        Self: 'a;
+        annotations: Vec<Self::Annotation>,
+    ) -> Self;
 }
-pub fn parse_member<'a, MemberType, AnnotationType, CommentType>(
+pub fn parse_member<'a, MemberType>(
     input: &'a str,
 ) -> IResult<&'a str, MemberType, VerboseError<&'a str>>
 where
-    MemberType: 'a + Member<'a, AnnotationType, CommentType>,
-    CommentType: From<String>,
-    AnnotationType: Annotation<'a>,
+    MemberType: 'a + Member<'a>,
 {
-    let (input, comment) = opt(parse_comment::<CommentType>).parse(input)?;
+    let (input, comment) = opt(parse_comment::<MemberType::Comment>).parse(input)?;
 
-    let (input, annotations) = opt(many0(|i| AnnotationType::parse(i))).parse(input)?;
+    let (input, annotations) = opt(many0(|i| Annotation::parse(i))).parse(input)?;
     let (input, _) = multispace0.parse(input)?;
     let (input, modifiers) = parse_modifiers(input)?;
     let (input, _) = multispace0.parse(input)?;
@@ -58,7 +56,14 @@ where
 
     Ok((
         input,
-        MemberType::member(name, ctype, default_value, comment, modifiers, annotations.unwrap_or_default()),
+        MemberType::member(
+            name,
+            ctype,
+            default_value,
+            comment,
+            modifiers,
+            annotations.unwrap_or_default(),
+        ),
     ))
 }
 

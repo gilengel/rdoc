@@ -27,7 +27,10 @@ pub struct CppFunction<'a> {
     pub comment: Option<CppComment>,
 }
 
-impl<'a> Method<'a, NoAnnotation, CppComment> for CppFunction<'a> {
+impl<'a> Method<'a> for CppFunction<'a> {
+    type MethodAnnotation = NoAnnotation;
+    type Comment = CppComment;
+
     fn method(
         name: &'a str,
         return_type: Option<CType<'a>>,
@@ -169,6 +172,9 @@ mod tests {
     use crate::parser::generic::method::CppStorageQualifier::Virtual;
     use crate::parser::generic::method::PostParamQualifier::Final;
     use crate::parser::generic::method::{PostParamQualifier, SpecialMember, parse_method};
+    use nom::Err::Error;
+    use nom_language::error::VerboseError;
+    use nom_language::error::VerboseErrorKind::Char;
 
     #[test]
     fn test_empty_braces() {
@@ -194,6 +200,18 @@ mod tests {
         assert_eq!(parse_brace_block(input), Ok(("", "")))
     }
 
+    #[test]
+    fn test_fails_for_invalid_argument_input() {
+        let input = "void muu(#INVALID) = 0";
+        let result = parse_method::<CppFunction>(input);
+
+        assert_eq!(
+            result,
+            Err(Error(VerboseError {
+                errors: vec![("#INVALID) = 0", Char(')'))]
+            }))
+        );
+    }
     #[test]
     fn test_method_without_params() {
         let input = "void method()";

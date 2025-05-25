@@ -3,7 +3,9 @@ use crate::parser::cpp::ctype::CType;
 use crate::parser::generic::annotation::Annotation;
 
 use crate::parser::cpp::method::{CppFunction, CppMethodParam};
-use crate::parser::generic::method::{CppStorageQualifier, Method, PostParamQualifier, SpecialMember};
+use crate::parser::generic::method::{
+    CppStorageQualifier, Method, PostParamQualifier, SpecialMember,
+};
 use nom::bytes::complete::{tag, take_till};
 use nom::sequence::preceded;
 use nom::{IResult, Parser};
@@ -28,7 +30,10 @@ pub struct UFunction<'a> {
     pub annotation: UFunctionAnnotation<'a>,
 }
 
-impl<'a> Method<'a, UFunctionAnnotation<'a>, CppComment> for UFunction<'a> {
+impl<'a> Method<'a> for UFunction<'a> {
+    type MethodAnnotation = UFunctionAnnotation<'a>;
+    type Comment = CppComment;
+
     fn method(
         name: &'a str,
         return_type: Option<CType<'a>>,
@@ -48,16 +53,18 @@ impl<'a> Method<'a, UFunctionAnnotation<'a>, CppComment> for UFunction<'a> {
         let annotation = annotations.get(0).cloned().unwrap_or_default();
 
         UFunction {
-            function: CppFunction::method(name,
-                                          return_type,
-                                          template_params,
-                                          params,
-                                          storage_qualifiers,
-                                          post_param_qualifiers,
-                                          special,
-                                          comment,
-                                          vec![]),
-            annotation
+            function: CppFunction::method(
+                name,
+                return_type,
+                template_params,
+                params,
+                storage_qualifiers,
+                post_param_qualifiers,
+                special,
+                comment,
+                vec![],
+            ),
+            annotation,
         }
     }
 }
@@ -74,7 +81,7 @@ mod test {
     #[test]
     fn test_parse() {
         let input = r#"UPROPERTY(EditAnywhere, Meta = (Bitmask))
-		int32 BasicBits"#;
+        int32 BasicBits"#;
 
         let result = parse_member.parse(input);
         let expected = Ok((

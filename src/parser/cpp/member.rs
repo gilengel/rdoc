@@ -12,7 +12,10 @@ pub struct CppMember<'a> {
     pub modifiers: Vec<CppMemberModifier>,
 }
 
-impl<'a> Member<'a, NoAnnotation, CppComment> for CppMember<'a> {
+impl<'a> Member<'a> for CppMember<'a> {
+    type Annotation = NoAnnotation;
+    type Comment = CppComment;
+
     fn member(
         name: &'a str,
         ctype: CType<'a>,

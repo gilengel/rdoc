@@ -13,7 +13,11 @@ use nom::sequence::{delimited, preceded};
 use nom::{IResult, Parser};
 use nom_language::error::VerboseError;
 
-pub trait Method<'a, AnnotationType, CommentType> {
+pub trait Method<'a> {
+    type MethodAnnotation: Annotation<'a> + 'a;
+
+    type Comment: From<String>;
+
     fn method(
         name: &'a str,
         return_type: Option<CType<'a>>,
@@ -22,12 +26,10 @@ pub trait Method<'a, AnnotationType, CommentType> {
         storage_qualifiers: Vec<CppStorageQualifier>,
         post_param_qualifiers: Vec<PostParamQualifier>,
         special: Option<SpecialMember>,
-        comment: Option<CommentType>,
-        annotations: Vec<AnnotationType>,
+        comment: Option<Self::Comment>,
+        annotations: Vec<Self::MethodAnnotation>,
     ) -> Self
     where
-        AnnotationType: Annotation<'a>,
-        CommentType: From<String>,
         Self: 'a;
 }
 
@@ -100,17 +102,15 @@ fn interface(input: &str) -> IResult<&str, &str, VerboseError<&str>> {
     Ok((input, ""))
 }
 
-pub fn parse_method<'a, MethodType, AnnotationType, CommentType>(
+pub fn parse_method<'a, MethodType>(
     input: &'a str,
 ) -> IResult<&'a str, MethodType, VerboseError<&'a str>>
 where
-    AnnotationType: Annotation<'a>,
-    CommentType: From<String>,
-    MethodType: 'a + Method<'a, AnnotationType, CommentType>,
+    MethodType: Method<'a> + 'a,
 {
-    let (input, annotations) = opt(many0(|i| AnnotationType::parse(i))).parse(input)?;
+    let (input, annotations) = opt(many0(|i| MethodType::MethodAnnotation::parse(i))).parse(input)?;
 
-    let (input, comment) = opt(parse_comment::<CommentType>).parse(input)?;
+    let (input, comment) = opt(parse_comment::<MethodType::Comment>).parse(input)?;
     let (input, storage_qualifiers) = opt(storage_qualifiers).parse(input)?;
     let (input, template_params) = opt(parse_template).parse(input)?;
     let (input, (return_type, name)) = alt((

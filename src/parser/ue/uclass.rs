@@ -1,7 +1,7 @@
 ﻿use crate::parser::cpp::comment::CppComment;
 use crate::parser::generic::annotation::Annotation;
 use crate::parser::generic::class::{Class, CppParentClass, InheritanceVisibility};
-use crate::parser::ue::ufunction::{UFunction, UFunctionAnnotation};
+use crate::parser::ue::ufunction::{UFunction};
 use crate::parser::ue::uproperty::{UProperty, UPropertyAnnotation};
 use nom::bytes::complete::{tag, take_till};
 use nom::character::complete::multispace0;
@@ -48,28 +48,25 @@ impl Default for UClass<'_> {
     }
 }
 
-impl<'a>
-    Class<
-        'a,
-        UClassAnnotation<'a>,
-        UFunction<'a>,
-        UFunctionAnnotation<'a>,
-        UProperty<'a>,
-        UPropertyAnnotation<'a>,
-        CppComment,
-    > for UClass<'a>
-where
-    Self: 'a,
-{
+impl<'a> Class<'a> for UClass<'a> {
+    type ClassAnnotation = UClassAnnotation<'a>;
+    type MemberAnnotation = UPropertyAnnotation<'a>;
+    type Comment = CppComment;
+    type Method = UFunction<'a>;
+    type Member = UProperty<'a>;
+
     fn class(
         name: &'a str,
         api: Option<&'a str>,
         parents: Vec<CppParentClass<'a>>,
-        methods: HashMap<InheritanceVisibility, Vec<UFunction<'a>>>,
-        members: HashMap<InheritanceVisibility, Vec<UProperty<'a>>>,
-        inner_classes: HashMap<InheritanceVisibility, Vec<UClass<'a>>>,
-        annotation: Option<Vec<UClassAnnotation<'a>>>,
-    ) -> Self {
+        methods: HashMap<InheritanceVisibility, Vec<Self::Method>>,
+        members: HashMap<InheritanceVisibility, Vec<Self::Member>>,
+        inner_classes: HashMap<InheritanceVisibility, Vec<Self>>,
+        annotation: Option<Vec<Self::ClassAnnotation>>,
+    ) -> Self
+    where
+        Self: 'a + Sized,
+    {
         let default = UClassAnnotation(vec![]); // this now lives long enough
         let annotation = annotation
             .unwrap_or_default()

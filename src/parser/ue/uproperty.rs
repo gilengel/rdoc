@@ -28,7 +28,10 @@ pub struct UProperty<'a> {
     pub annotation: UPropertyAnnotation<'a>,
 }
 
-impl<'a> Member<'a, UPropertyAnnotation<'a>, CppComment> for UProperty<'a> {
+impl<'a> Member<'a> for UProperty<'a> {
+    type Annotation = UPropertyAnnotation<'a>;
+    type Comment = CppComment;
+
     fn member(
         name: &'a str,
         ctype: CType<'a>,
